@@ -167,7 +167,7 @@
                         priceVIP: 30000, 
                         priceREG: 20000, 
                         priceUM: 10000,
-                        qrisImageUrl: "WhatsApp Image 2026-08-17 at 11.11.50_2.jpeg" 
+                        qrisImageUrl: "qris.jpeg" 
                     });
                 }
             },
@@ -190,11 +190,15 @@
                 const { db, doc, getDoc } = window.FB;
                 const snap = await getDoc(doc(db, "posera_config", "settings"));
                 const data = snap.exists() ? snap.data() : {};
+                let qrisUrl = data.qrisImageUrl;
+                if (!qrisUrl || qrisUrl.trim() === "" || qrisUrl.includes("WhatsApp")) {
+                    qrisUrl = "qris.jpeg";
+                }
                 return {
                     priceVIP: data.priceVIP || 30000,
                     priceREG: data.priceREG || 20000,
                     priceUM: data.priceUM || 10000,
-                    qrisImageUrl: data.qrisImageUrl && data.qrisImageUrl.trim() !== "" ? data.qrisImageUrl : "WhatsApp Image 2026-08-17 at 11.11.50_2.jpeg"
+                    qrisImageUrl: qrisUrl
                 };
             },
 
@@ -254,7 +258,7 @@
                             const idx = seats.findIndex(s => s.id === t.seat);
                             if(idx > -1) seats[idx].status = 'SOLD';
                         });
-                    } else if (status === 'REJECTED' || status === 'CANCELLED') {
+                    } else if (status === 'REJECTED' || status === 'CANCELLED' || status === 'EXPIRED') {
                         targetOrder.tickets.forEach(t => {
                             const idx = seats.findIndex(s => s.id === t.seat);
                             if(idx > -1) seats[idx].status = 'AVAILABLE';
@@ -364,6 +368,45 @@
             return <div className="bg-white p-2 rounded-lg inline-block w-full text-center overflow-hidden"><svg ref={barcodeRef} className="max-w-full"></svg></div>;
         };
 
+        // Komponen Timer Hitung Mundur 48 Jam
+        const PaymentCountdown = ({ createdAt, onExpire }) => {
+            const [timeLeft, setTimeLeft] = useState({ hours: 0, minutes: 0, seconds: 0, isExpired: false });
+
+            useEffect(() => {
+                const calculateTime = () => {
+                    const createdTime = new Date(createdAt).getTime();
+                    const expiryTime = createdTime + (48 * 60 * 60 * 1000); // 48 Jam
+                    const now = new Date().getTime();
+                    const difference = expiryTime - now;
+
+                    if (difference <= 0) {
+                        setTimeLeft({ hours: 0, minutes: 0, seconds: 0, isExpired: true });
+                        if (onExpire) onExpire();
+                    } else {
+                        const hours = Math.floor((difference % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                        const minutes = Math.floor((difference % (1000 * 60 * 60)) / (1000 * 60));
+                        const seconds = Math.floor((difference % (1000 * 60)) / 1000);
+                        setTimeLeft({ hours, minutes, seconds, isExpired: false });
+                    }
+                };
+
+                calculateTime();
+                const timer = setInterval(calculateTime, 1000);
+                return () => clearInterval(timer);
+            }, [createdAt]);
+
+            if (timeLeft.isExpired) {
+                return <span className="text-red-500 font-bold">Waktu Pembayaran Habis (Kadaluarsa)</span>;
+            }
+
+            return (
+                <div className="flex items-center gap-2 bg-posera-red/20 border border-posera-red text-red-300 px-3 py-2 rounded-lg text-xs font-mono">
+                    <i className="fas fa-clock animate-spin"></i>
+                    <span>Batas Bayar: <b>{String(timeLeft.hours).padStart(2, '0')}j {String(timeLeft.minutes).padStart(2, '0')}m {String(timeLeft.seconds).padStart(2, '0')}d</b></span>
+                </div>
+            );
+        };
+
         const HomeView = ({ navigate }) => (
             <div className="flex flex-col items-center justify-center min-h-screen px-4 bg-cinematic relative overflow-hidden py-10">
                 <div className="absolute top-0 left-0 w-full h-full bg-[url('posera 1nd.jpg')] bg-cover bg-center opacity-20 blur-md pointer-events-none" onError={(e)=>{e.target.style.display='none';}}></div>
@@ -419,7 +462,7 @@
             const [paymentMethod, setPaymentMethod] = useState('BNI');
             const [paymentProof, setPaymentProof] = useState(null);
             const [isProcessing, setIsProcessing] = useState(false);
-            const [settings, setSettings] = useState({ priceVIP: 30000, priceREG: 20000, priceUM: 10000, qrisImageUrl: "WhatsApp Image 2026-08-17 at 11.11.50_2.jpeg" });
+            const [settings, setSettings] = useState({ priceVIP: 30000, priceREG: 20000, priceUM: 10000, qrisImageUrl: "qris.jpeg" });
 
             useEffect(() => {
                 const loadData = async () => {
@@ -596,7 +639,6 @@
                                     
                                     {paymentMethod === 'BNI' && <div className="bg-gray-900 p-4 rounded-lg text-left w-full"><span className="font-bold block text-white text-sm">BNI: 0264092424</span><span className="text-xs sm:text-sm text-gray-300">A.N: Dewi chandrawati</span></div>}
                                     
-                                    {/* QRIS PERMANEN */}
                                     {paymentMethod === 'QRIS' && (
                                         <div className="bg-gray-900 p-4 rounded-lg text-center w-full flex flex-col items-center">
                                             <img src={settings.qrisImageUrl} alt="QRIS" className="mx-auto max-h-48 bg-white p-2 rounded mb-3 shadow" />
@@ -619,7 +661,16 @@
                                         </div>
                                     )}
 
-                                    {paymentMethod === 'BOOKING' && <div className="bg-gray-900 p-4 rounded-lg text-left w-full text-xs text-yellow-400">Kursi dikunci. Bayar cash/offline saat di lokasi acara.</div>}
+                                    {paymentMethod === 'BOOKING' && (
+                                        <div className="bg-gray-900 p-4 rounded-lg text-left w-full text-xs text-yellow-400 space-y-2 border border-yellow-600/30">
+                                            <div className="font-bold flex items-center gap-2">
+                                                <i className="fas fa-exclamation-triangle"></i> PERHATIAN BOOKING TIKET:
+                                            </div>
+                                            <p className="text-gray-300 leading-relaxed">
+                                                Tiket yang dibooking memiliki **batas waktu pembayaran maksimal 48 jam**. Jika melewati batas waktu tersebut dan belum melakukan pelunasan/konfirmasi, sistem akan otomatis membatalkan pemesanan dan kursi akan dibuka kembali untuk umum.
+                                            </p>
+                                        </div>
+                                    )}
                                 </div>
 
                                 {paymentMethod !== 'BOOKING' && (
@@ -645,7 +696,7 @@
                     <div className="w-20 h-20 bg-green-900/30 text-green-500 rounded-full flex items-center justify-center text-4xl mx-auto mb-6"><i className="fas fa-check"></i></div>
                     <h2 className="text-2xl font-bold mb-2">Pesanan Berhasil</h2>
                     <p className="font-mono text-xl sm:text-2xl font-bold text-posera-gold mb-6 select-all">{params.orderId}</p>
-                    <button onClick={() => navigate('check', { orderId: params.orderId })} className="w-full bg-white text-black py-3 rounded-lg font-bold mb-3 text-sm sm:text-base">Cek E-Ticket</button>
+                    <button onClick={() => navigate('check', { orderId: params.orderId })} className="w-full bg-white text-black py-3 rounded-lg font-bold mb-3 text-sm sm:text-base">Cek E-Ticket / Status</button>
                     <button onClick={() => navigate('home')} className="w-full text-gray-400 py-2 text-sm sm:text-base">Beranda</button>
                 </div>
             </div>
@@ -659,7 +710,20 @@
                 e?.preventDefault();
                 const allOrders = await DB.getOrders();
                 const found = allOrders.find(o => o.orderId.toUpperCase() === orderId.toUpperCase().trim());
-                if(found) setOrder(found); else setToast('Order ID tidak ditemukan.', 'error');
+                if(found) {
+                    // Cek otomatis jika metode BOOKING dan sudah lewat 48 jam
+                    if (found.paymentMethod === 'BOOKING' && found.status === 'WAITING_VERIFICATION') {
+                        const createdTime = new Date(found.createdAt).getTime();
+                        const expiryTime = createdTime + (48 * 60 * 60 * 1000);
+                        if (new Date().getTime() > expiryTime) {
+                            await DB.updateOrderStatus(found.firestoreId, found.orderId, 'EXPIRED');
+                            found.status = 'EXPIRED';
+                        }
+                    }
+                    setOrder(found);
+                } else {
+                    setToast('Order ID tidak ditemukan.', 'error');
+                }
             };
 
             useEffect(() => { if(params?.orderId) handleCheck(); }, []);
@@ -671,7 +735,7 @@
                         <button onClick={() => navigate('home')} className="text-gray-400 text-sm sm:text-base">Beranda</button>
                     </nav>
 
-                    <h2 className="text-2xl sm:text-3xl font-cinematic mb-8 text-center">Cek E-Ticket</h2>
+                    <h2 className="text-2xl sm:text-3xl font-cinematic mb-8 text-center">Cek Status & E-Ticket</h2>
                     <form onSubmit={handleCheck} className="flex flex-col sm:flex-row gap-3 sm:gap-4 mb-10 max-w-lg mx-auto">
                         <input type="text" placeholder="Masukkan Order ID" className="flex-1 bg-black border border-gray-700 rounded-xl px-5 py-3 text-white uppercase text-center text-sm sm:text-base" value={orderId} onChange={e => setOrderId(e.target.value)} />
                         <button type="submit" className="bg-posera-red px-6 py-3 rounded-xl font-bold text-sm sm:text-base">Cari</button>
@@ -680,10 +744,27 @@
                     {order && (
                         <div className="bg-posera-gray p-6 rounded-3xl border border-gray-800 shadow-2xl">
                             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-gray-800 pb-4 mb-6 gap-3">
-                                <div><h3 className="text-xl font-bold">{order.name}</h3><p className="text-posera-gold font-mono">{order.orderId}</p></div>
-                                <span className={`px-4 py-1.5 rounded-full text-xs font-bold uppercase ${order.status === 'PAID' ? 'bg-green-900/50 text-green-400' : 'bg-yellow-900/50 text-yellow-400'}`}>{order.status}</span>
+                                <div>
+                                    <h3 className="text-xl font-bold">{order.name}</h3>
+                                    <p className="text-posera-gold font-mono">{order.orderId}</p>
+                                    <p className="text-xs text-gray-400 mt-1">Metode: <span className="uppercase text-white font-bold">{order.paymentMethod || 'BNI'}</span></p>
+                                </div>
+                                <div className="flex flex-col items-end gap-2">
+                                    <span className={`px-4 py-1.5 rounded-full text-xs font-bold uppercase ${order.status === 'PAID' ? 'bg-green-900/50 text-green-400' : order.status === 'EXPIRED' ? 'bg-red-900/50 text-red-400' : 'bg-yellow-900/50 text-yellow-400'}`}>
+                                        {order.status === 'EXPIRED' ? 'KADALUARSA (EXPIRED)' : order.status}
+                                    </span>
+                                    {order.paymentMethod === 'BOOKING' && order.status === 'WAITING_VERIFICATION' && (
+                                        <PaymentCountdown createdAt={order.createdAt} />
+                                    )}
+                                </div>
                             </div>
                             
+                            {order.status === 'EXPIRED' && (
+                                <div className="bg-red-950/40 border border-red-800/60 p-4 rounded-xl text-center text-red-300 text-sm mb-6">
+                                    <i className="fas fa-ban mr-2"></i> Batas waktu pembayaran 48 jam telah terlewati. Pesanan dibatalkan otomatis dan kursi telah dikembalikan ke sistem.
+                                </div>
+                            )}
+
                             {order.status === 'PAID' && (
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     {order.tickets.map((t, idx) => (
@@ -747,6 +828,19 @@
                     const st = await DB.getSettings();
                     const ord = await DB.getOrders();
                     const sts = await DB.getSeats();
+                    
+                    // Cek otomatis expired pesanan booking di sisi admin juga
+                    for (let o of ord) {
+                        if (o.paymentMethod === 'BOOKING' && o.status === 'WAITING_VERIFICATION') {
+                            const createdTime = new Date(o.createdAt).getTime();
+                            const expiryTime = createdTime + (48 * 60 * 60 * 1000);
+                            if (new Date().getTime() > expiryTime) {
+                                await DB.updateOrderStatus(o.firestoreId, o.orderId, 'EXPIRED');
+                                o.status = 'EXPIRED';
+                            }
+                        }
+                    }
+
                     setSettings(st);
                     setQrisInput(st.qrisImageUrl || '');
                     setOrders(ord);
@@ -902,7 +996,7 @@
                                                         )}
                                                     </td>
                                                     <td className="p-3 md:p-4">
-                                                        <span className={`px-2.5 py-1 rounded-full text-[10px] md:text-xs font-bold uppercase ${o.status === 'PAID' ? 'bg-green-900/50 text-green-400 border border-green-700/50' : 'bg-yellow-900/50 text-yellow-400 border border-yellow-700/50'}`}>{o.status}</span>
+                                                        <span className={`px-2.5 py-1 rounded-full text-[10px] md:text-xs font-bold uppercase ${o.status === 'PAID' ? 'bg-green-900/50 text-green-400 border border-green-700/50' : o.status === 'EXPIRED' ? 'bg-red-900/50 text-red-400 border border-red-700/50' : 'bg-yellow-900/50 text-yellow-400 border border-yellow-700/50'}`}>{o.status}</span>
                                                     </td>
                                                     <td className="p-3 md:p-4 text-center">
                                                         {o.status === 'WAITING_VERIFICATION' && (
