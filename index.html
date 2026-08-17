@@ -50,7 +50,8 @@
     <!-- Firebase SDK & Inisialisasi -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, getDocs, addDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        // IMPORT runTransaction DITAMBAHKAN UNTUK MENCEGAH DATA TERTIMPA ONLINE
+        import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, getDocs, addDoc, deleteDoc, runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyBkvUShOn9Ip-4-lDgrCKQ3mg22BXEYidY",
@@ -66,7 +67,7 @@
         const db = getFirestore(app);
 
         window.FB = {
-            db, doc, getDoc, setDoc, updateDoc, collection, getDocs, addDoc, deleteDoc
+            db, doc, getDoc, setDoc, updateDoc, collection, getDocs, addDoc, deleteDoc, runTransaction
         };
         console.log("Firebase Firestore berhasil terhubung secara online!");
     </script>
@@ -208,32 +209,42 @@
             },
             
             createOrder: async (order) => {
-                const { db, doc, getDoc, setDoc, collection, addDoc } = window.FB;
+                const { db, doc, collection, addDoc, runTransaction } = window.FB;
                 const seatDocRef = doc(db, "posera_config", "seats");
-                const seatSnap = await getDoc(seatDocRef);
-                let seats = seatSnap.data().list;
 
-                for (let t of order.tickets) {
-                    const seat = seats.find(s => s.id === t.seat);
-                    if (!seat || seat.status !== 'AVAILABLE') throw new Error(`Maaf, kursi ${t.seat} baru saja dipesan orang lain.`);
-                }
+                // MENGGUNAKAN TRANSACTION UNTUK MENCEGAH DATA TERTIMPA SAAT CHECKOUT BERSAMAAN
+                await runTransaction(db, async (transaction) => {
+                    const seatSnap = await transaction.get(seatDocRef);
+                    if (!seatSnap.exists()) throw new Error("Konfigurasi kursi belum ada.");
+                    
+                    let seats = seatSnap.data().list;
 
-                order.tickets.forEach(t => {
-                    const idx = seats.findIndex(s => s.id === t.seat);
-                    if(idx > -1) seats[idx].status = 'RESERVED';
+                    // Validasi apakah tiket masih tersedia
+                    for (let t of order.tickets) {
+                        const seat = seats.find(s => s.id === t.seat);
+                        if (!seat || seat.status !== 'AVAILABLE') {
+                            throw new Error(`Maaf, kursi ${t.seat} baru saja dipesan orang lain.`);
+                        }
+                    }
+
+                    // Tandai menjadi RESERVED
+                    order.tickets.forEach(t => {
+                        const idx = seats.findIndex(s => s.id === t.seat);
+                        if(idx > -1) seats[idx].status = 'RESERVED';
+                    });
+
+                    // Update database atomik
+                    transaction.update(seatDocRef, { list: seats });
                 });
 
+                // Jika transaction berhasil, simpan data order
                 order.createdAt = new Date().toISOString();
-                await setDoc(seatDocRef, { list: seats });
                 await addDoc(collection(db, "posera_orders"), order);
             },
             
             updateOrderStatus: async (orderFirestoreId, orderId, status) => {
-                const { db, doc, getDoc, setDoc, updateDoc, collection, getDocs } = window.FB;
-                const seatDocRef = doc(db, "posera_config", "seats");
-                const seatSnap = await getDoc(seatDocRef);
-                let seats = seatSnap.data().list;
-
+                const { db, doc, updateDoc, collection, getDocs, runTransaction } = window.FB;
+                
                 const ordersRef = collection(db, "posera_orders");
                 const snap = await getDocs(ordersRef);
                 let targetDocRef = null;
@@ -254,39 +265,72 @@
                             qrToken: t.qrToken || `POS-${Math.random().toString(36).substring(2, 10).toUpperCase()}`,
                             status: 'VALID'
                         }));
-                        targetOrder.tickets.forEach(t => {
-                            const idx = seats.findIndex(s => s.id === t.seat);
-                            if(idx > -1) seats[idx].status = 'SOLD';
-                        });
-                    } else if (status === 'REJECTED' || status === 'CANCELLED' || status === 'EXPIRED') {
-                        targetOrder.tickets.forEach(t => {
-                            const idx = seats.findIndex(s => s.id === t.seat);
-                            if(idx > -1) seats[idx].status = 'AVAILABLE';
-                        });
                     }
-                    await setDoc(seatDocRef, { list: seats });
+
+                    const seatDocRef = doc(db, "posera_config", "seats");
+                    await runTransaction(db, async (transaction) => {
+                        const seatSnap = await transaction.get(seatDocRef);
+                        if(seatSnap.exists()) {
+                            let seats = seatSnap.data().list;
+                            let modified = false;
+
+                            if (status === 'PAID') {
+                                targetOrder.tickets.forEach(t => {
+                                    const idx = seats.findIndex(s => s.id === t.seat);
+                                    if(idx > -1) { seats[idx].status = 'SOLD'; modified = true; }
+                                });
+                            } else if (status === 'REJECTED' || status === 'CANCELLED' || status === 'EXPIRED') {
+                                targetOrder.tickets.forEach(t => {
+                                    const idx = seats.findIndex(s => s.id === t.seat);
+                                    if(idx > -1) { seats[idx].status = 'AVAILABLE'; modified = true; }
+                                });
+                            }
+                            
+                            if (modified) transaction.update(seatDocRef, { list: seats });
+                        }
+                    });
+
                     await updateDoc(targetDocRef, targetOrder);
                 }
             },
 
             deleteOrders: async (orderIdsToDelete) => {
-                const { db, doc, getDoc, setDoc, collection, getDocs, deleteDoc } = window.FB;
-                const seatDocRef = doc(db, "posera_config", "seats");
-                const seatSnap = await getDoc(seatDocRef);
-                let seats = seatSnap.data().list;
-
+                const { db, doc, collection, getDocs, deleteDoc, runTransaction } = window.FB;
+                
                 const snap = await getDocs(collection(db, "posera_orders"));
-                for (let d of snap.docs) {
+                let ordersToDelete = [];
+                snap.forEach(d => {
                     const orderData = d.data();
                     if (orderIdsToDelete.includes(orderData.orderId) || orderIdsToDelete.includes(d.id)) {
-                        orderData.tickets.forEach(t => {
-                            const seatIdx = seats.findIndex(s => s.id === t.seat);
-                            if(seatIdx > -1) seats[seatIdx].status = 'AVAILABLE';
-                        });
-                        await deleteDoc(doc(db, "posera_orders", d.id));
+                        ordersToDelete.push({ id: d.id, data: orderData });
+                    }
+                });
+
+                if (ordersToDelete.length > 0) {
+                    const seatDocRef = doc(db, "posera_config", "seats");
+                    
+                    await runTransaction(db, async (transaction) => {
+                        const seatSnap = await transaction.get(seatDocRef);
+                        if(seatSnap.exists()) {
+                            let seats = seatSnap.data().list;
+                            let modified = false;
+
+                            ordersToDelete.forEach(o => {
+                                o.data.tickets.forEach(t => {
+                                    const seatIdx = seats.findIndex(s => s.id === t.seat);
+                                    if(seatIdx > -1) { seats[seatIdx].status = 'AVAILABLE'; modified = true; }
+                                });
+                            });
+                            
+                            if (modified) transaction.update(seatDocRef, { list: seats });
+                        }
+                    });
+
+                    // Hapus dokumen ordernya setelah kursi dilepas
+                    for (let o of ordersToDelete) {
+                        await deleteDoc(doc(db, "posera_orders", o.id));
                     }
                 }
-                await setDoc(seatDocRef, { list: seats });
             },
 
             resetDatabase: async () => {
@@ -523,7 +567,11 @@
                     setStep(1); 
                     const s = await DB.getSeats(); 
                     setSeats(s); 
-                    setSelectedSeats([]);
+                    // Filter out seats that are no longer available from user cart automatically
+                    setSelectedSeats(prev => prev.filter(pSeat => {
+                        const updatedSeat = s.find(us => us.id === pSeat.id);
+                        return updatedSeat && updatedSeat.status === 'AVAILABLE';
+                    }));
                 } finally {
                     setIsProcessing(false);
                 }
@@ -564,9 +612,10 @@
                                             <h4 className="text-center text-gray-500 text-[10px] sm:text-xs mb-4 tracking-widest uppercase border-b border-gray-800 pb-2">Sayap Kiri</h4>
                                             <div className="grid grid-cols-4 sm:grid-cols-5 gap-1.5 sm:gap-2">
                                                 {leftWingSeats.map(seat => (
-                                                    <div key={seat.id} onClick={() => toggleSeat(seat)}
-                                                        className={`seat text-[10px] sm:text-xs py-2 rounded text-center border font-mono ${seat.status !== 'AVAILABLE' ? seat.status : selectedSeats.find(s => s.id === seat.id) ? 'selected' : 'border-gray-700 text-gray-400 AVAILABLE'}`}>
-                                                        {seat.id.split('-')[1]}
+                                                    <div key={seat.id} onClick={() => toggleSeat(seat)} title={seat.id}
+                                                        className={`seat flex flex-col justify-center items-center py-1.5 rounded text-center border font-mono ${seat.status !== 'AVAILABLE' ? seat.status : selectedSeats.find(s => s.id === seat.id) ? 'selected' : 'border-gray-700 text-gray-400 AVAILABLE hover:border-posera-gold hover:text-posera-gold'}`}>
+                                                        <span className="text-[8px] sm:text-[9px] font-bold opacity-70 mb-0.5">{seat.id.split('-')[0]}</span>
+                                                        <span className="text-[10px] sm:text-[11px] font-bold leading-none">{seat.id.split('-')[1]}</span>
                                                     </div>
                                                 ))}
                                             </div>
@@ -580,9 +629,10 @@
                                             <h4 className="text-center text-gray-500 text-[10px] sm:text-xs mb-4 tracking-widest uppercase border-b border-gray-800 pb-2">Sayap Kanan</h4>
                                             <div className="grid grid-cols-4 sm:grid-cols-5 gap-1.5 sm:gap-2">
                                                 {rightWingSeats.map(seat => (
-                                                    <div key={seat.id} onClick={() => toggleSeat(seat)}
-                                                        className={`seat text-[10px] sm:text-xs py-2 rounded text-center border font-mono ${seat.status !== 'AVAILABLE' ? seat.status : selectedSeats.find(s => s.id === seat.id) ? 'selected' : 'border-gray-700 text-gray-400 AVAILABLE'}`}>
-                                                        {seat.id.split('-')[1]}
+                                                    <div key={seat.id} onClick={() => toggleSeat(seat)} title={seat.id}
+                                                        className={`seat flex flex-col justify-center items-center py-1.5 rounded text-center border font-mono ${seat.status !== 'AVAILABLE' ? seat.status : selectedSeats.find(s => s.id === seat.id) ? 'selected' : 'border-gray-700 text-gray-400 AVAILABLE hover:border-posera-gold hover:text-posera-gold'}`}>
+                                                        <span className="text-[8px] sm:text-[9px] font-bold opacity-70 mb-0.5">{seat.id.split('-')[0]}</span>
+                                                        <span className="text-[10px] sm:text-[11px] font-bold leading-none">{seat.id.split('-')[1]}</span>
                                                     </div>
                                                 ))}
                                             </div>
@@ -597,7 +647,7 @@
                                     <div className="space-y-2 mb-6 max-h-40 overflow-y-auto pr-1">
                                         {selectedSeats.map(s => (
                                             <div key={s.id} className="flex justify-between text-xs sm:text-sm bg-black p-2.5 rounded">
-                                                <span className="font-bold text-posera-gold">{s.id} ({s.cat})</span>
+                                                <span className="font-bold text-posera-gold">{s.id}</span>
                                                 <span>Rp {prices[s.cat].toLocaleString('id-ID')}</span>
                                             </div>
                                         ))}
@@ -634,7 +684,7 @@
                                 </div>
 
                                 <div className="bg-black p-6 rounded-xl border border-gray-800 mb-4 text-center">
-                                    <p className="text-sm text-gray-400 mb-2">Total Tagihan ({selectedSeats.length} Kursi):</p>
+                                    <p className="text-sm text-gray-400 mb-2">Total Tagihan ({selectedSeats.length} Tiket):</p>
                                     <p className="text-2xl sm:text-3xl font-bold text-posera-gold mb-4">Rp {selectedSeats.reduce((sum, s) => sum + prices[s.cat], 0).toLocaleString('id-ID')}</p>
                                     
                                     {paymentMethod === 'BNI' && <div className="bg-gray-900 p-4 rounded-lg text-left w-full"><span className="font-bold block text-white text-sm">BNI: 0264092424</span><span className="text-xs sm:text-sm text-gray-300">A.N: Dewi chandrawati</span></div>}
@@ -711,7 +761,6 @@
                 const allOrders = await DB.getOrders();
                 const found = allOrders.find(o => o.orderId.toUpperCase() === orderId.toUpperCase().trim());
                 if(found) {
-                    // Cek otomatis jika metode BOOKING dan sudah lewat 48 jam
                     if (found.paymentMethod === 'BOOKING' && found.status === 'WAITING_VERIFICATION') {
                         const createdTime = new Date(found.createdAt).getTime();
                         const expiryTime = createdTime + (48 * 60 * 60 * 1000);
@@ -773,7 +822,7 @@
                                                 <img src="posera 1nd.jpg" alt="Logo" className="absolute inset-0 w-full h-full object-cover opacity-50" onError={(e)=>{e.target.style.display='none';}} />
                                                 <div className="relative z-10 text-center bg-black/60 p-3 rounded-xl w-full border border-posera-gold/30">
                                                     <p className="text-posera-gold font-bold uppercase tracking-widest mb-1 text-xs">{t.cat}</p>
-                                                    <p className="text-3xl sm:text-4xl font-cinematic text-white drop-shadow-md">{t.seat}</p>
+                                                    <p className="text-3xl sm:text-4xl font-cinematic text-white drop-shadow-md">{t.seat.split('-')[1]}</p>
                                                 </div>
                                             </div>
                                             <div className="p-5 flex-1 flex flex-col items-center justify-center relative bg-[#0a0a0a]">
@@ -829,7 +878,6 @@
                     const ord = await DB.getOrders();
                     const sts = await DB.getSeats();
                     
-                    // Cek otomatis expired pesanan booking di sisi admin juga
                     for (let o of ord) {
                         if (o.paymentMethod === 'BOOKING' && o.status === 'WAITING_VERIFICATION') {
                             const createdTime = new Date(o.createdAt).getTime();
@@ -866,19 +914,13 @@
             };
 
             const handleSelectAll = (e) => {
-                if (e.target.checked) {
-                    setSelectedOrderIds(orders.map(o => o.orderId));
-                } else {
-                    setSelectedOrderIds([]);
-                }
+                if (e.target.checked) setSelectedOrderIds(orders.map(o => o.orderId));
+                else setSelectedOrderIds([]);
             };
 
             const handleCheckboxChange = (orderId) => {
-                if (selectedOrderIds.includes(orderId)) {
-                    setSelectedOrderIds(selectedOrderIds.filter(id => id !== orderId));
-                } else {
-                    setSelectedOrderIds([...selectedOrderIds, orderId]);
-                }
+                if (selectedOrderIds.includes(orderId)) setSelectedOrderIds(selectedOrderIds.filter(id => id !== orderId));
+                else setSelectedOrderIds([...selectedOrderIds, orderId]);
             };
 
             const handleBulkVerify = async () => {
@@ -968,8 +1010,8 @@
                                                     <input type="checkbox" onChange={handleSelectAll} checked={orders.length > 0 && selectedOrderIds.length === orders.length} className="cursor-pointer accent-posera-red w-4 h-4" />
                                                 </th>
                                                 <th className="p-3 md:p-4">ID</th>
-                                                <th className="p-3 md:p-4">Nama / Kontak</th>
-                                                <th className="p-3 md:p-4">Metode & Bukti Bayar</th>
+                                                <th className="p-3 md:p-4">Nama / Detail Tiket</th>
+                                                <th className="p-3 md:p-4">Metode & Bukti</th>
                                                 <th className="p-3 md:p-4">Status</th>
                                                 <th className="p-3 md:p-4 text-center">Aksi</th>
                                             </tr>
@@ -982,8 +1024,15 @@
                                                     </td>
                                                     <td className="p-3 md:p-4 font-mono text-posera-gold font-bold">{o.orderId}</td>
                                                     <td className="p-3 md:p-4">
-                                                        <div className="font-bold text-white">{o.name}</div>
-                                                        <div className="text-[11px] text-gray-400">{o.wa}</div>
+                                                        <div className="font-bold text-white text-sm">{o.name}</div>
+                                                        <div className="text-[11px] text-gray-400 mb-1.5">{o.wa}</div>
+                                                        <div className="flex flex-wrap gap-1 max-w-[200px]">
+                                                            {o.tickets && o.tickets.map((t, idx) => (
+                                                                <span key={idx} className="bg-gray-800 text-posera-gold px-1.5 py-0.5 rounded text-[10px] font-mono border border-gray-700">
+                                                                    {t.seat}
+                                                                </span>
+                                                            ))}
+                                                        </div>
                                                     </td>
                                                     <td className="p-3 md:p-4">
                                                         <div className="text-[11px] font-bold uppercase text-gray-300 mb-1">{o.paymentMethod || 'BNI'}</div>
