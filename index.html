@@ -42,15 +42,15 @@
     <!-- Babel for JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
-    <!-- QR Code & Barcode Libraries -->
+    <!-- QR Code, Barcode & Excel Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
     <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.0/dist/JsBarcode.all.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
     <!-- Firebase SDK & Inisialisasi -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        // IMPORT runTransaction DITAMBAHKAN UNTUK MENCEGAH DATA TERTIMPA ONLINE
         import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, getDocs, addDoc, deleteDoc, runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         const firebaseConfig = {
@@ -86,32 +86,6 @@
         .seat {
             transition: all 0.2s ease;
             user-select: none;
-        }
-        .seat.AVAILABLE:hover {
-            transform: scale(1.15);
-            cursor: pointer;
-            box-shadow: 0 0 12px rgba(212, 175, 55, 0.6);
-            border-color: #D4AF37;
-            z-index: 10;
-        }
-        .seat.selected {
-            background-color: #D4AF37;
-            color: #000;
-            border-color: #D4AF37;
-            font-weight: bold;
-        }
-        .seat.RESERVED {
-            background-color: #8B0000;
-            color: #fff;
-            cursor: not-allowed;
-            border-color: #5c0000;
-            opacity: 0.8;
-        }
-        .seat.SOLD {
-            background-color: #333;
-            color: #666;
-            cursor: not-allowed;
-            border-color: #222;
         }
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         
@@ -153,11 +127,12 @@
                 
                 const seatDocRef = doc(db, "posera_config", "seats");
                 const seatSnap = await getDoc(seatDocRef);
+                // 80 (VIP) + 150 (REG) + 200 (UMUM) = 430 kursi
                 if (!seatSnap.exists() || seatSnap.data().list.length !== 430) {
                     const seats = [];
-                    for(let i=1; i<=80; i++) seats.push({ id: `VIP-${String(i).padStart(3,'0')}`, cat: 'VIP', status: 'AVAILABLE' });
-                    for(let i=1; i<=150; i++) seats.push({ id: `REG-${String(i).padStart(3,'0')}`, cat: 'REGULER', status: 'AVAILABLE' });
-                    for(let i=1; i<=200; i++) seats.push({ id: `UM-${String(i).padStart(3,'0')}`, cat: 'UMUM', status: 'AVAILABLE' });
+                    for(let i=1; i<=80; i++) seats.push({ id: `VIP-26-${String(i).padStart(3,'0')}`, cat: 'VIP', status: 'AVAILABLE' });
+                    for(let i=1; i<=150; i++) seats.push({ id: `REG-26-${String(i).padStart(3,'0')}`, cat: 'REGULER', status: 'AVAILABLE' });
+                    for(let i=1; i<=200; i++) seats.push({ id: `UM-26-${String(i).padStart(3,'0')}`, cat: 'UMUM', status: 'AVAILABLE' });
                     await setDoc(seatDocRef, { list: seats });
                 }
 
@@ -184,6 +159,8 @@
                 const snap = await getDocs(collection(db, "posera_orders"));
                 let orders = [];
                 snap.forEach(d => orders.push({ firestoreId: d.id, ...d.data() }));
+                // Urutkan berdasarkan waktu pemesanan (terbaru di atas)
+                orders.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
                 return orders;
             },
 
@@ -326,7 +303,6 @@
                         }
                     });
 
-                    // Hapus dokumen ordernya setelah kursi dilepas
                     for (let o of ordersToDelete) {
                         await deleteDoc(doc(db, "posera_orders", o.id));
                     }
@@ -341,9 +317,9 @@
                 await Promise.all(deletePromises);
 
                 const seats = [];
-                for(let i=1; i<=80; i++) seats.push({ id: `VIP-${String(i).padStart(3,'0')}`, cat: 'VIP', status: 'AVAILABLE' });
-                for(let i=1; i<=150; i++) seats.push({ id: `REG-${String(i).padStart(3,'0')}`, cat: 'REGULER', status: 'AVAILABLE' });
-                for(let i=1; i<=200; i++) seats.push({ id: `UM-${String(i).padStart(3,'0')}`, cat: 'UMUM', status: 'AVAILABLE' });
+                for(let i=1; i<=80; i++) seats.push({ id: `VIP-26-${String(i).padStart(3,'0')}`, cat: 'VIP', status: 'AVAILABLE' });
+                for(let i=1; i<=150; i++) seats.push({ id: `REG-26-${String(i).padStart(3,'0')}`, cat: 'REGULER', status: 'AVAILABLE' });
+                for(let i=1; i<=200; i++) seats.push({ id: `UM-26-${String(i).padStart(3,'0')}`, cat: 'UMUM', status: 'AVAILABLE' });
                 
                 await setDoc(doc(db, "posera_config", "seats"), { list: seats });
             },
@@ -534,6 +510,19 @@
                 }
             };
 
+            const getSeatColors = (seat, isSelected) => {
+                if(seat.status === 'RESERVED') return 'bg-red-900 text-gray-300 border-red-950 cursor-not-allowed';
+                if(seat.status === 'SOLD') return 'bg-gray-800 text-gray-600 border-gray-900 cursor-not-allowed';
+                if(isSelected) return 'bg-posera-gold text-black border-posera-gold font-bold scale-110 shadow-[0_0_10px_rgba(212,175,55,0.6)] cursor-pointer';
+                
+                // Colors based on category: VIP (Green), REGULER (Red), UMUM (Yellow)
+                if(seat.cat === 'VIP') return 'border-green-600/60 text-green-500 hover:border-green-400 hover:text-green-400 hover:shadow-[0_0_12px_rgba(34,197,94,0.5)] cursor-pointer hover:scale-110';
+                if(seat.cat === 'REGULER') return 'border-red-600/60 text-red-500 hover:border-red-400 hover:text-red-400 hover:shadow-[0_0_12px_rgba(239,68,68,0.5)] cursor-pointer hover:scale-110';
+                if(seat.cat === 'UMUM') return 'border-yellow-600/60 text-yellow-500 hover:border-yellow-400 hover:text-yellow-400 hover:shadow-[0_0_12px_rgba(234,179,8,0.5)] cursor-pointer hover:scale-110';
+                
+                return 'border-gray-700 text-gray-400 cursor-pointer';
+            };
+
             const handleFileChange = (e) => {
                 const file = e.target.files[0];
                 if (file) {
@@ -550,7 +539,20 @@
                 setIsProcessing(true);
                 try {
                     const allOrders = await DB.getOrders();
-                    const orderId = `POSERA-26-${String(allOrders.length + 1).padStart(4, '0')}`;
+                    
+                    // MEMPERBAIKI PENOMORAN AGAR SPESIFIK & TIDAK DUPLIKAT
+                    const catPrefix = selectedCat === 'VIP' ? 'ORD-VIP-26-' : selectedCat === 'REGULER' ? 'ORD-REG-26-' : 'ORD-UM-26-';
+                    let maxNum = 0;
+                    
+                    // Cari angka pesanan tertinggi dari kategori yang sama
+                    allOrders.forEach(o => {
+                        if (o.orderId && o.orderId.startsWith(catPrefix)) {
+                            const num = parseInt(o.orderId.replace(catPrefix, ''), 10);
+                            if (!isNaN(num) && num > maxNum) maxNum = num;
+                        }
+                    });
+                    
+                    const orderId = `${catPrefix}${String(maxNum + 1).padStart(3, '0')}`;
                     const total = selectedSeats.reduce((sum, seat) => sum + prices[seat.cat], 0);
                     
                     await DB.createOrder({
@@ -567,7 +569,6 @@
                     setStep(1); 
                     const s = await DB.getSeats(); 
                     setSeats(s); 
-                    // Filter out seats that are no longer available from user cart automatically
                     setSelectedSeats(prev => prev.filter(pSeat => {
                         const updatedSeat = s.find(us => us.id === pSeat.id);
                         return updatedSeat && updatedSeat.status === 'AVAILABLE';
@@ -595,7 +596,7 @@
                                 <div className="flex gap-3 mb-6 overflow-x-auto pb-2 hide-scrollbar">
                                     {['VIP', 'REGULER', 'UMUM'].map(cat => (
                                         <button key={cat} onClick={() => { setSelectedCat(cat); }}
-                                            className={`px-4 py-3 rounded-xl font-bold flex-1 text-center transition-all border-2 text-xs sm:text-sm ${selectedCat === cat ? 'bg-posera-red border-posera-red text-white' : 'bg-gray-900 border-gray-800 text-gray-400'}`}>
+                                            className={`px-4 py-3 rounded-xl font-bold flex-1 text-center transition-all border-2 text-xs sm:text-sm ${selectedCat === cat ? 'bg-posera-red border-posera-red text-white shadow-lg shadow-red-900/50' : 'bg-gray-900 border-gray-800 text-gray-400 hover:border-gray-600'}`}>
                                             <div>{cat}</div>
                                             <div className="text-xs sm:text-sm font-normal text-posera-gold">Rp {prices[cat].toLocaleString('id-ID')}</div>
                                         </button>
@@ -613,9 +614,9 @@
                                             <div className="grid grid-cols-4 sm:grid-cols-5 gap-1.5 sm:gap-2">
                                                 {leftWingSeats.map(seat => (
                                                     <div key={seat.id} onClick={() => toggleSeat(seat)} title={seat.id}
-                                                        className={`seat flex flex-col justify-center items-center py-1.5 rounded text-center border font-mono ${seat.status !== 'AVAILABLE' ? seat.status : selectedSeats.find(s => s.id === seat.id) ? 'selected' : 'border-gray-700 text-gray-400 AVAILABLE hover:border-posera-gold hover:text-posera-gold'}`}>
+                                                        className={`seat flex flex-col justify-center items-center py-1.5 rounded text-center border font-mono ${getSeatColors(seat, selectedSeats.find(s => s.id === seat.id))}`}>
                                                         <span className="text-[8px] sm:text-[9px] font-bold opacity-70 mb-0.5">{seat.id.split('-')[0]}</span>
-                                                        <span className="text-[10px] sm:text-[11px] font-bold leading-none">{seat.id.split('-')[1]}</span>
+                                                        <span className="text-[10px] sm:text-[11px] font-bold leading-none">{seat.id.split('-')[2]}</span>
                                                     </div>
                                                 ))}
                                             </div>
@@ -630,9 +631,9 @@
                                             <div className="grid grid-cols-4 sm:grid-cols-5 gap-1.5 sm:gap-2">
                                                 {rightWingSeats.map(seat => (
                                                     <div key={seat.id} onClick={() => toggleSeat(seat)} title={seat.id}
-                                                        className={`seat flex flex-col justify-center items-center py-1.5 rounded text-center border font-mono ${seat.status !== 'AVAILABLE' ? seat.status : selectedSeats.find(s => s.id === seat.id) ? 'selected' : 'border-gray-700 text-gray-400 AVAILABLE hover:border-posera-gold hover:text-posera-gold'}`}>
+                                                        className={`seat flex flex-col justify-center items-center py-1.5 rounded text-center border font-mono ${getSeatColors(seat, selectedSeats.find(s => s.id === seat.id))}`}>
                                                         <span className="text-[8px] sm:text-[9px] font-bold opacity-70 mb-0.5">{seat.id.split('-')[0]}</span>
-                                                        <span className="text-[10px] sm:text-[11px] font-bold leading-none">{seat.id.split('-')[1]}</span>
+                                                        <span className="text-[10px] sm:text-[11px] font-bold leading-none">{seat.id.split('-')[2]}</span>
                                                     </div>
                                                 ))}
                                             </div>
@@ -646,9 +647,9 @@
                                 {selectedSeats.length === 0 ? <p className="text-center py-8 text-gray-500 text-sm">Belum ada kursi dipilih</p> : (
                                     <div className="space-y-2 mb-6 max-h-40 overflow-y-auto pr-1">
                                         {selectedSeats.map(s => (
-                                            <div key={s.id} className="flex justify-between text-xs sm:text-sm bg-black p-2.5 rounded">
-                                                <span className="font-bold text-posera-gold">{s.id}</span>
-                                                <span>Rp {prices[s.cat].toLocaleString('id-ID')}</span>
+                                            <div key={s.id} className="flex justify-between items-center text-xs sm:text-sm bg-black p-2.5 rounded border border-gray-800">
+                                                <span className={`font-bold ${s.cat==='VIP'?'text-green-500':s.cat==='REGULER'?'text-red-500':'text-yellow-500'}`}>{s.id}</span>
+                                                <span className="text-gray-300">Rp {prices[s.cat].toLocaleString('id-ID')}</span>
                                             </div>
                                         ))}
                                     </div>
@@ -659,7 +660,7 @@
                                         <span className="text-posera-gold">Rp {selectedSeats.reduce((sum, s) => sum + prices[s.cat], 0).toLocaleString('id-ID')}</span>
                                     </div>
                                 </div>
-                                <button disabled={selectedSeats.length === 0} onClick={() => setStep(2)} className="w-full bg-white text-black py-3.5 sm:py-4 rounded-lg font-bold text-sm sm:text-base disabled:opacity-50">Lanjut Data Pemesan</button>
+                                <button disabled={selectedSeats.length === 0} onClick={() => setStep(2)} className="w-full bg-white text-black py-3.5 sm:py-4 rounded-lg font-bold text-sm sm:text-base disabled:opacity-50 hover:bg-gray-200 transition">Lanjut Data Pemesan</button>
                             </div>
                         </div>
                     )}
@@ -669,9 +670,9 @@
                             <div>
                                 <h3 className="text-xl font-bold mb-6 text-posera-gold border-b border-gray-800 pb-2">Data Pemesan</h3>
                                 <div className="space-y-4">
-                                    <input type="text" placeholder="Nama Lengkap" className="w-full bg-black border border-gray-700 rounded-lg px-4 py-3 text-white text-sm sm:text-base" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
-                                    <input type="tel" placeholder="Nomor WhatsApp" className="w-full bg-black border border-gray-700 rounded-lg px-4 py-3 text-white text-sm sm:text-base" value={formData.wa} onChange={e => setFormData({...formData, wa: e.target.value})} />
-                                    <input type="email" placeholder="Alamat Email" className="w-full bg-black border border-gray-700 rounded-lg px-4 py-3 text-white text-sm sm:text-base" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} />
+                                    <input type="text" placeholder="Nama Lengkap" className="w-full bg-black border border-gray-700 rounded-lg px-4 py-3 text-white text-sm sm:text-base focus:border-posera-gold outline-none" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+                                    <input type="tel" placeholder="Nomor WhatsApp" className="w-full bg-black border border-gray-700 rounded-lg px-4 py-3 text-white text-sm sm:text-base focus:border-posera-gold outline-none" value={formData.wa} onChange={e => setFormData({...formData, wa: e.target.value})} />
+                                    <input type="email" placeholder="Alamat Email" className="w-full bg-black border border-gray-700 rounded-lg px-4 py-3 text-white text-sm sm:text-base focus:border-posera-gold outline-none" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} />
                                 </div>
                             </div>
                             
@@ -679,7 +680,7 @@
                                 <h3 className="text-xl font-bold mb-6 text-posera-gold border-b border-gray-800 pb-2">Metode Pembayaran</h3>
                                 <div className="grid grid-cols-3 gap-2 mb-6">
                                     {['BNI', 'QRIS', 'BOOKING'].map(m => (
-                                        <button key={m} type="button" onClick={() => setPaymentMethod(m)} className={`p-3 rounded-lg border font-bold text-xs text-center ${paymentMethod === m ? 'bg-posera-red border-posera-red text-white' : 'bg-black border-gray-700 text-gray-400'}`}>{m}</button>
+                                        <button key={m} type="button" onClick={() => setPaymentMethod(m)} className={`p-3 rounded-lg border font-bold text-xs text-center transition-all ${paymentMethod === m ? 'bg-posera-red border-posera-red text-white' : 'bg-black border-gray-700 text-gray-400 hover:border-gray-500'}`}>{m}</button>
                                     ))}
                                 </div>
 
@@ -687,10 +688,10 @@
                                     <p className="text-sm text-gray-400 mb-2">Total Tagihan ({selectedSeats.length} Tiket):</p>
                                     <p className="text-2xl sm:text-3xl font-bold text-posera-gold mb-4">Rp {selectedSeats.reduce((sum, s) => sum + prices[s.cat], 0).toLocaleString('id-ID')}</p>
                                     
-                                    {paymentMethod === 'BNI' && <div className="bg-gray-900 p-4 rounded-lg text-left w-full"><span className="font-bold block text-white text-sm">BNI: 0264092424</span><span className="text-xs sm:text-sm text-gray-300">A.N: Dewi chandrawati</span></div>}
+                                    {paymentMethod === 'BNI' && <div className="bg-gray-900 p-4 rounded-lg text-left w-full border border-gray-700"><span className="font-bold block text-white text-sm">BNI: 0264092424</span><span className="text-xs sm:text-sm text-gray-300">A.N: Dewi chandrawati</span></div>}
                                     
                                     {paymentMethod === 'QRIS' && (
-                                        <div className="bg-gray-900 p-4 rounded-lg text-center w-full flex flex-col items-center">
+                                        <div className="bg-gray-900 p-4 rounded-lg text-center w-full flex flex-col items-center border border-gray-700">
                                             <img src={settings.qrisImageUrl} alt="QRIS" className="mx-auto max-h-48 bg-white p-2 rounded mb-3 shadow" />
                                             <a 
                                                 href={settings.qrisImageUrl} 
@@ -712,8 +713,8 @@
                                     )}
 
                                     {paymentMethod === 'BOOKING' && (
-                                        <div className="bg-gray-900 p-4 rounded-lg text-left w-full text-xs text-yellow-400 space-y-2 border border-yellow-600/30">
-                                            <div className="font-bold flex items-center gap-2">
+                                        <div className="bg-gray-900 p-4 rounded-lg text-left w-full text-xs text-yellow-400 space-y-2 border border-yellow-600/50">
+                                            <div className="font-bold flex items-center gap-2 text-sm">
                                                 <i className="fas fa-exclamation-triangle"></i> PERHATIAN BOOKING TIKET:
                                             </div>
                                             <p className="text-gray-300 leading-relaxed">
@@ -726,11 +727,11 @@
                                 {paymentMethod !== 'BOOKING' && (
                                     <div className="mb-6">
                                         <label className="block text-sm text-gray-400 mb-2">Upload Bukti Pembayaran *</label>
-                                        <input type="file" accept="image/*" onChange={handleFileChange} className="w-full bg-black border border-gray-700 rounded-lg p-2 text-sm text-gray-300" />
+                                        <input type="file" accept="image/*" onChange={handleFileChange} className="w-full bg-black border border-gray-700 rounded-lg p-2 text-sm text-gray-300 focus:outline-none" />
                                     </div>
                                 )}
                                 
-                                <button onClick={handleCheckout} disabled={isProcessing} className="w-full bg-posera-red text-white py-4 rounded-xl font-bold flex justify-center items-center gap-2 text-sm sm:text-base">
+                                <button onClick={handleCheckout} disabled={isProcessing} className="w-full bg-posera-red hover:bg-red-800 text-white py-4 rounded-xl font-bold flex justify-center items-center gap-2 text-sm sm:text-base transition">
                                     {isProcessing ? <div className="loader"></div> : 'Selesaikan Pesanan'}
                                 </button>
                             </div>
@@ -745,9 +746,10 @@
                 <div className="bg-posera-gray p-8 sm:p-10 rounded-3xl border border-gray-800 max-w-lg w-full">
                     <div className="w-20 h-20 bg-green-900/30 text-green-500 rounded-full flex items-center justify-center text-4xl mx-auto mb-6"><i className="fas fa-check"></i></div>
                     <h2 className="text-2xl font-bold mb-2">Pesanan Berhasil</h2>
-                    <p className="font-mono text-xl sm:text-2xl font-bold text-posera-gold mb-6 select-all">{params.orderId}</p>
-                    <button onClick={() => navigate('check', { orderId: params.orderId })} className="w-full bg-white text-black py-3 rounded-lg font-bold mb-3 text-sm sm:text-base">Cek E-Ticket / Status</button>
-                    <button onClick={() => navigate('home')} className="w-full text-gray-400 py-2 text-sm sm:text-base">Beranda</button>
+                    <p className="font-mono text-xl sm:text-2xl font-bold text-posera-gold mb-2 select-all">{params.orderId}</p>
+                    <p className="text-gray-400 text-xs mb-8">Gunakan Order ID di atas untuk mengecek status dan e-ticket Anda.</p>
+                    <button onClick={() => navigate('check', { orderId: params.orderId })} className="w-full bg-white text-black py-3 rounded-lg font-bold mb-3 text-sm sm:text-base hover:bg-gray-200 transition">Cek E-Ticket / Status</button>
+                    <button onClick={() => navigate('home')} className="w-full text-gray-400 py-2 text-sm sm:text-base hover:text-white transition">Beranda</button>
                 </div>
             </div>
         );
@@ -759,7 +761,14 @@
             const handleCheck = async (e) => {
                 e?.preventDefault();
                 const allOrders = await DB.getOrders();
-                const found = allOrders.find(o => o.orderId.toUpperCase() === orderId.toUpperCase().trim());
+                const searchVal = orderId.toUpperCase().trim();
+                
+                // MENCARI BERDASARKAN ORDER ID -ATAU- ID KURSI (MEMPERMUDAH USER)
+                let found = allOrders.find(o => o.orderId.toUpperCase() === searchVal);
+                if (!found) {
+                    found = allOrders.find(o => o.tickets && o.tickets.some(t => t.seat.toUpperCase() === searchVal));
+                }
+
                 if(found) {
                     if (found.paymentMethod === 'BOOKING' && found.status === 'WAITING_VERIFICATION') {
                         const createdTime = new Date(found.createdAt).getTime();
@@ -771,7 +780,7 @@
                     }
                     setOrder(found);
                 } else {
-                    setToast('Order ID tidak ditemukan.', 'error');
+                    setToast('Data tidak ditemukan. Pastikan Order ID atau ID Kursi benar.', 'error');
                 }
             };
 
@@ -781,17 +790,17 @@
                 <div className="pt-8 pb-12 px-4 max-w-5xl mx-auto min-h-screen">
                     <nav className="mb-10 flex justify-between items-center border-b border-gray-800 pb-4">
                         <div className="font-cinematic font-bold text-xl sm:text-2xl text-posera-gold cursor-pointer" onClick={() => navigate('home')}>POSERA</div>
-                        <button onClick={() => navigate('home')} className="text-gray-400 text-sm sm:text-base">Beranda</button>
+                        <button onClick={() => navigate('home')} className="text-gray-400 hover:text-white transition text-sm sm:text-base">Beranda</button>
                     </nav>
 
                     <h2 className="text-2xl sm:text-3xl font-cinematic mb-8 text-center">Cek Status & E-Ticket</h2>
                     <form onSubmit={handleCheck} className="flex flex-col sm:flex-row gap-3 sm:gap-4 mb-10 max-w-lg mx-auto">
-                        <input type="text" placeholder="Masukkan Order ID" className="flex-1 bg-black border border-gray-700 rounded-xl px-5 py-3 text-white uppercase text-center text-sm sm:text-base" value={orderId} onChange={e => setOrderId(e.target.value)} />
-                        <button type="submit" className="bg-posera-red px-6 py-3 rounded-xl font-bold text-sm sm:text-base">Cari</button>
+                        <input type="text" placeholder="Masukkan Order ID atau ID Kursi (Contoh: ORD-VIP-26-001 atau VIP-26-001)" className="flex-1 bg-black border border-gray-700 focus:border-posera-gold rounded-xl px-5 py-3 text-white uppercase text-center text-[11px] sm:text-sm outline-none" value={orderId} onChange={e => setOrderId(e.target.value)} />
+                        <button type="submit" className="bg-posera-red hover:bg-red-800 px-6 py-3 rounded-xl font-bold text-sm sm:text-base transition">Cari</button>
                     </form>
 
                     {order && (
-                        <div className="bg-posera-gray p-6 rounded-3xl border border-gray-800 shadow-2xl">
+                        <div className="bg-posera-gray p-6 rounded-3xl border border-gray-800 shadow-2xl fade-in">
                             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-gray-800 pb-4 mb-6 gap-3">
                                 <div>
                                     <h3 className="text-xl font-bold">{order.name}</h3>
@@ -816,13 +825,19 @@
 
                             {order.status === 'PAID' && (
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    {order.tickets.map((t, idx) => (
+                                    {order.tickets.map((t, idx) => {
+                                        // Visual Warna e-ticket mengikuti kategori
+                                        const catColor = t.cat === 'VIP' ? 'text-green-500' : t.cat === 'REGULER' ? 'text-red-500' : 'text-yellow-500';
+                                        const borderColor = t.cat === 'VIP' ? 'border-green-500/30' : t.cat === 'REGULER' ? 'border-red-500/30' : 'border-yellow-500/30';
+                                        
+                                        return (
                                         <div key={idx} className="bg-black rounded-2xl border border-gray-800 overflow-hidden flex flex-col sm:flex-row relative shadow-lg">
                                             <div className="sm:w-2/5 w-full bg-gray-900 border-b sm:border-b-0 sm:border-r border-gray-800 relative h-32 sm:h-auto flex flex-col justify-center items-center p-4">
-                                                <img src="posera 1nd.jpg" alt="Logo" className="absolute inset-0 w-full h-full object-cover opacity-50" onError={(e)=>{e.target.style.display='none';}} />
-                                                <div className="relative z-10 text-center bg-black/60 p-3 rounded-xl w-full border border-posera-gold/30">
-                                                    <p className="text-posera-gold font-bold uppercase tracking-widest mb-1 text-xs">{t.cat}</p>
-                                                    <p className="text-3xl sm:text-4xl font-cinematic text-white drop-shadow-md">{t.seat.split('-')[1]}</p>
+                                                <img src="posera 1nd.jpg" alt="Logo" className="absolute inset-0 w-full h-full object-cover opacity-30 blur-[2px]" onError={(e)=>{e.target.style.display='none';}} />
+                                                <div className={`relative z-10 text-center bg-black/80 p-3 rounded-xl w-full border ${borderColor}`}>
+                                                    <p className={`font-bold uppercase tracking-widest mb-1 text-xs ${catColor}`}>{t.cat}</p>
+                                                    <p className="text-3xl sm:text-4xl font-cinematic text-white drop-shadow-md">{t.seat.split('-')[2]}</p>
+                                                    <p className="text-[10px] text-gray-400 mt-1">{t.seat}</p>
                                                 </div>
                                             </div>
                                             <div className="p-5 flex-1 flex flex-col items-center justify-center relative bg-[#0a0a0a]">
@@ -830,10 +845,10 @@
                                                     <BarcodeDisplay value={t.qrToken} />
                                                     <QRCodeDisplay value={t.qrToken} />
                                                 </div>
-                                                <p className="text-xs text-gray-500 font-mono mt-3 border-t border-gray-800 pt-2 w-full text-center">{t.qrToken}</p>
+                                                <p className="text-[10px] text-gray-500 font-mono mt-3 border-t border-gray-800 pt-2 w-full text-center">{t.qrToken}</p>
                                             </div>
                                         </div>
-                                    ))}
+                                    )})}
                                 </div>
                             )}
                         </div>
@@ -849,10 +864,10 @@
                 <div className="min-h-screen flex items-center justify-center bg-cinematic px-4">
                     <form onSubmit={(e) => { e.preventDefault(); if(user==='admin'&&pass==='poserasemur') onLogin(); else setToast('Login Salah', 'error'); }} className="bg-posera-gray p-8 sm:p-10 rounded-3xl border border-gray-800 w-full max-w-md">
                         <h2 className="text-2xl sm:text-3xl font-cinematic text-posera-gold font-bold text-center mb-6">ADMIN PANEL</h2>
-                        <input type="text" placeholder="Username" className="w-full bg-black border border-gray-700 rounded-xl p-4 text-white mb-4 text-sm sm:text-base" value={user} onChange={e=>setUser(e.target.value)} required />
-                        <input type="password" placeholder="Password" className="w-full bg-black border border-gray-700 rounded-xl p-4 text-white mb-6 text-sm sm:text-base" value={pass} onChange={e=>setPass(e.target.value)} required />
-                        <button type="submit" className="w-full bg-posera-red py-4 rounded-xl font-bold mb-4">Login</button>
-                        <button type="button" onClick={() => navigate('home')} className="w-full text-gray-400 text-sm">Kembali</button>
+                        <input type="text" placeholder="Username" className="w-full bg-black border border-gray-700 focus:border-posera-gold outline-none rounded-xl p-4 text-white mb-4 text-sm sm:text-base" value={user} onChange={e=>setUser(e.target.value)} required />
+                        <input type="password" placeholder="Password" className="w-full bg-black border border-gray-700 focus:border-posera-gold outline-none rounded-xl p-4 text-white mb-6 text-sm sm:text-base" value={pass} onChange={e=>setPass(e.target.value)} required />
+                        <button type="submit" className="w-full bg-posera-red hover:bg-red-800 transition py-4 rounded-xl font-bold mb-4">Login</button>
+                        <button type="button" onClick={() => navigate('home')} className="w-full text-gray-400 text-sm hover:text-white transition">Kembali</button>
                     </form>
                 </div>
             );
@@ -947,8 +962,54 @@
                 }
             };
 
+            // FUNGSI EKSPOR EXCEL
+            const handleExportExcel = () => {
+                if (orders.length === 0) return setToast('Belum ada data pesanan', 'error');
+
+                const wb = window.XLSX.utils.book_new();
+                
+                // Helper pemrosesan per kategori
+                const processCategory = (categoryName) => {
+                    const rows = [];
+                    orders.forEach(o => {
+                        if (o.tickets) {
+                            o.tickets.forEach(t => {
+                                if (t.cat === categoryName) {
+                                    rows.push({
+                                        "Order ID": o.orderId,
+                                        "Nama Pemesan": o.name,
+                                        "No WA": o.wa,
+                                        "Email": o.email,
+                                        "ID Kursi": t.seat,
+                                        "Kategori": t.cat,
+                                        "Harga": t.price,
+                                        "Metode Bayar": o.paymentMethod,
+                                        "Status Order": o.status,
+                                        "Waktu Order": new Date(o.createdAt).toLocaleString('id-ID')
+                                    });
+                                }
+                            });
+                        }
+                    });
+                    return rows;
+                };
+
+                const dataVIP = processCategory('VIP');
+                const dataREG = processCategory('REGULER');
+                const dataUMUM = processCategory('UMUM');
+
+                if (dataVIP.length > 0) window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.json_to_sheet(dataVIP), "Data VIP");
+                if (dataREG.length > 0) window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.json_to_sheet(dataREG), "Data REGULER");
+                if (dataUMUM.length > 0) window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.json_to_sheet(dataUMUM), "Data UMUM");
+
+                if (wb.SheetNames.length === 0) return setToast('Tidak ada tiket yang bisa diexport', 'error');
+
+                window.XLSX.writeFile(wb, "Rekapan_Tiket_Sangkala.xlsx");
+                setToast('File Rekapan Excel berhasil didownload', 'success');
+            };
+
             const handleResetDatabase = async () => {
-                const confirmation = prompt('⚠️ PERHATIAN BAHAYA!\nTindakan ini akan MENGHAPUS SEMUA PESANAN secara permanen dan MENGOSONGKAN SELURUH KURSI kembali menjadi AVAILABLE.\n\nKetik "RESET" (tanpa tanda kutip) untuk melanjutkan:');
+                const confirmation = prompt('⚠️ PERHATIAN BAHAYA!\nTindakan ini akan MENGHAPUS SEMUA PESANAN secara permanen dan MENGOSONGKAN SELURUH KURSI (430 Kursi) kembali menjadi AVAILABLE.\n\nKetik "RESET" (tanpa tanda kutip) untuk melanjutkan:');
                 if (confirmation === 'RESET') {
                     try {
                         await DB.resetDatabase();
@@ -986,9 +1047,14 @@
 
                     <div className="flex-1 overflow-y-auto p-4 md:p-8 relative">
                         {view === 'orders' && (
-                            <div>
+                            <div className="fade-in">
                                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-                                    <h1 className="text-xl md:text-2xl font-bold">Manajemen Pesanan</h1>
+                                    <h1 className="text-xl md:text-2xl font-bold flex items-center gap-4">
+                                        Manajemen Pesanan 
+                                        <button onClick={handleExportExcel} className="bg-green-700 hover:bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-lg flex items-center gap-2">
+                                            <i className="fas fa-file-excel"></i> Export Rekapan Excel
+                                        </button>
+                                    </h1>
                                     
                                     {selectedOrderIds.length > 0 && (
                                         <div className="flex flex-wrap gap-2">
@@ -1028,7 +1094,7 @@
                                                         <div className="text-[11px] text-gray-400 mb-1.5">{o.wa}</div>
                                                         <div className="flex flex-wrap gap-1 max-w-[200px]">
                                                             {o.tickets && o.tickets.map((t, idx) => (
-                                                                <span key={idx} className="bg-gray-800 text-posera-gold px-1.5 py-0.5 rounded text-[10px] font-mono border border-gray-700">
+                                                                <span key={idx} className={`px-1.5 py-0.5 rounded text-[10px] font-mono border font-bold ${t.cat === 'VIP' ? 'bg-green-900/30 text-green-400 border-green-800' : t.cat === 'REGULER' ? 'bg-red-900/30 text-red-400 border-red-800' : 'bg-yellow-900/30 text-yellow-400 border-yellow-800'}`}>
                                                                     {t.seat}
                                                                 </span>
                                                             ))}
@@ -1062,19 +1128,19 @@
                         )}
 
                         {view === 'settings' && (
-                            <div className="max-w-xl mx-auto space-y-6">
+                            <div className="max-w-xl mx-auto space-y-6 fade-in">
                                 <div className="bg-posera-gray p-6 rounded-2xl border border-gray-800">
                                     <h1 className="text-xl md:text-2xl font-bold mb-4">Pengaturan Web</h1>
                                     <form onSubmit={async (e) => { e.preventDefault(); await DB.updateSettings({...settings, qrisImageUrl: qrisInput}); setToast('Disimpan ke Firestore!', 'success'); }} className="space-y-4">
-                                        <div><label className="text-xs text-gray-400">URL QRIS</label><input type="text" className="w-full bg-black border border-gray-700 p-3 rounded text-white text-sm" value={qrisInput} onChange={e=>setQrisInput(e.target.value)} /></div>
-                                        <button type="submit" className="w-full bg-posera-gold text-black py-3 rounded font-bold">Simpan</button>
+                                        <div><label className="text-xs text-gray-400">URL QRIS</label><input type="text" className="w-full bg-black border border-gray-700 focus:border-posera-gold outline-none p-3 rounded text-white text-sm" value={qrisInput} onChange={e=>setQrisInput(e.target.value)} /></div>
+                                        <button type="submit" className="w-full bg-posera-gold hover:opacity-90 text-black py-3 rounded font-bold transition">Simpan</button>
                                     </form>
                                 </div>
 
                                 <div className="bg-posera-gray p-6 rounded-2xl border border-red-900/50">
                                     <h1 className="text-xl md:text-2xl font-bold mb-2 text-red-500">Zona Berbahaya</h1>
                                     <p className="text-sm text-gray-400 mb-4 leading-relaxed">
-                                        Fitur ini digunakan untuk persiapan rilis publik. Semua data pesanan yang pernah masuk akan <b>dihapus permanen</b> dan semua kursi akan dikembalikan ke status <b>AVAILABLE</b>.
+                                        Fitur ini digunakan untuk persiapan rilis publik. Semua data pesanan yang pernah masuk akan <b>dihapus permanen</b> dan semua kursi (430 tiket) akan dikembalikan ke status <b>AVAILABLE</b>.
                                     </p>
                                     <button onClick={handleResetDatabase} className="w-full bg-red-900 hover:bg-red-700 text-white py-3.5 rounded-lg font-bold transition shadow-lg flex justify-center items-center gap-2">
                                         <i className="fas fa-radiation"></i> Reset Seluruh Database
@@ -1084,7 +1150,7 @@
                         )}
 
                         {view === 'scan' && (
-                            <div className="max-w-xl mx-auto">
+                            <div className="max-w-xl mx-auto fade-in">
                                 <h1 className="text-xl md:text-2xl font-bold mb-4">Scanner QR/Barcode</h1>
                                 <div id="qr-reader-admin" className="w-full min-h-[300px] bg-black border border-gray-700 rounded-xl"></div>
                             </div>
