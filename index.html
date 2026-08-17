@@ -717,7 +717,7 @@
             const [pass, setPass] = useState('');
             return (
                 <div className="min-h-screen flex items-center justify-center bg-cinematic px-4">
-                    <form onSubmit={(e) => { e.preventDefault(); if(user==='admin'&&pass==='admin123') onLogin(); else setToast('Login Salah', 'error'); }} className="bg-posera-gray p-8 sm:p-10 rounded-3xl border border-gray-800 w-full max-w-md">
+                    <form onSubmit={(e) => { e.preventDefault(); if(user==='admin'&&pass==='poserasemur') onLogin(); else setToast('Login Salah', 'error'); }} className="bg-posera-gray p-8 sm:p-10 rounded-3xl border border-gray-800 w-full max-w-md">
                         <h2 className="text-2xl sm:text-3xl font-cinematic text-posera-gold font-bold text-center mb-6">ADMIN PANEL</h2>
                         <input type="text" placeholder="Username" className="w-full bg-black border border-gray-700 rounded-xl p-4 text-white mb-4 text-sm sm:text-base" value={user} onChange={e=>setUser(e.target.value)} required />
                         <input type="password" placeholder="Password" className="w-full bg-black border border-gray-700 rounded-xl p-4 text-white mb-6 text-sm sm:text-base" value={pass} onChange={e=>setPass(e.target.value)} required />
