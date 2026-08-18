@@ -5,13 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>POSERA - SANGKALA Performance Art</title>
     
-    <!-- Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     
-    <!-- Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -35,23 +32,20 @@
         }
     </script>
 
-    <!-- React & ReactDOM -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     
-    <!-- Babel for JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
-    <!-- QR Code, Barcode & Excel Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
     <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.0/dist/JsBarcode.all.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
-    <!-- Firebase SDK & Inisialisasi -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, getDocs, addDoc, deleteDoc, runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        // PERBAIKAN: Menambahkan import query dan where
+        import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, getDocs, addDoc, deleteDoc, runTransaction, query, where } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyBkvUShOn9Ip-4-lDgrCKQ3mg22BXEYidY",
@@ -66,8 +60,9 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
 
+        // PERBAIKAN: Menambahkan query dan where ke window.FB
         window.FB = {
-            db, doc, getDoc, setDoc, updateDoc, collection, getDocs, addDoc, deleteDoc, runTransaction
+            db, doc, getDoc, setDoc, updateDoc, collection, getDocs, addDoc, deleteDoc, runTransaction, query, where
         };
         console.log("Firebase Firestore berhasil terhubung secara online!");
     </script>
@@ -213,20 +208,25 @@
                 await addDoc(collection(db, "posera_orders"), order);
             },
             
+            // PERBAIKAN: Menggunakan Query agar tidak boros kuota harian Firebase
             updateOrderStatus: async (orderFirestoreId, orderId, status) => {
-                const { db, doc, updateDoc, collection, getDocs, runTransaction } = window.FB;
+                const { db, doc, updateDoc, collection, getDocs, runTransaction, query, where, getDoc } = window.FB;
                 
-                const ordersRef = collection(db, "posera_orders");
-                const snap = await getDocs(ordersRef);
                 let targetDocRef = null;
                 let targetOrder = null;
 
-                snap.forEach(d => {
-                    if (d.id === orderFirestoreId || d.data().orderId === orderId) {
-                        targetDocRef = doc(db, "posera_orders", d.id);
-                        targetOrder = d.data();
+                if (orderFirestoreId) {
+                    targetDocRef = doc(db, "posera_orders", orderFirestoreId);
+                    const snap = await getDoc(targetDocRef);
+                    if (snap.exists()) targetOrder = snap.data();
+                } else if (orderId) {
+                    const q = query(collection(db, "posera_orders"), where("orderId", "==", orderId));
+                    const snap = await getDocs(q);
+                    if (!snap.empty) {
+                        targetDocRef = doc(db, "posera_orders", snap.docs[0].id);
+                        targetOrder = snap.docs[0].data();
                     }
-                });
+                }
 
                 if (targetOrder && targetDocRef) {
                     targetOrder.status = status;
