@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>POSERA - SANGKALA Performance Art</title>
+    <title>POSERA (Performance Of Semut Merah) - SANGKALA </title>
     
     <!-- Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -244,7 +244,7 @@
                         targetOrder.tickets = targetOrder.tickets.map(t => ({
                             ...t, 
                             qrToken: t.qrToken || `POS-${Math.random().toString(36).substring(2, 10).toUpperCase()}`,
-                            status: 'VALID'
+                            status: 'VALID' // status awal tiket setelah lunas adalah VALID
                         }));
                     }
 
@@ -349,7 +349,7 @@
                 if (!foundTicket) return { success: false, msg: 'TIKET TIDAK DITEMUKAN / BELUM LUNAS' };
                 if (foundTicket.status === 'USED') return { success: false, msg: 'TIKET SUDAH DIGUNAKAN', data: foundTicket };
                 
-                foundTicket.status = 'USED';
+                foundTicket.status = 'USED'; // Status tiket berubah menjadi USED setelah check-in
                 foundTicket.usedAt = new Date().toISOString();
                 
                 await updateDoc(doc(db, "posera_orders", foundOrderDocId), { tickets: foundOrderData.tickets });
@@ -398,7 +398,6 @@
             useEffect(() => {
                 const calculateTime = () => {
                     const createdTime = new Date(createdAt).getTime();
-                    // Durasi Booking diubah menjadi 24 Jam
                     const expiryTime = createdTime + (24 * 60 * 60 * 1000); 
                     const now = new Date().getTime();
                     const difference = expiryTime - now;
@@ -693,7 +692,7 @@
                                     
                                     {paymentMethod === 'QRIS' && (
                                         <div className="bg-gray-900 p-4 rounded-lg text-center w-full flex flex-col items-center border border-gray-700">
-                                            <img src={settings.qrisImageUrl} alt="QRIS" className="mx-auto max-h-24 bg-white p-2 rounded mb-3 shadow" />
+                                            <img src={settings.qrisImageUrl} alt="QRIS" className="mx-auto max-h-48 bg-white p-2 rounded mb-3 shadow" />
                                             <a 
                                                 href={settings.qrisImageUrl} 
                                                 download="QRIS-POSERA.jpg" 
@@ -902,6 +901,9 @@
                                                         <QRCodeDisplay value={t.qrToken} />
                                                     </div>
                                                     <p className="text-[10px] text-gray-500 font-mono mt-3 border-t border-gray-800 pt-2 w-full text-center">Token: {t.qrToken}</p>
+                                                    {t.status === 'USED' && (
+                                                        <p className="text-xs text-green-500 font-bold mt-2"><i className="fas fa-check-circle"></i> SUDAH CHECK-IN</p>
+                                                    )}
                                                 </div>
                                             </div>
                                             
@@ -951,30 +953,31 @@
                 localStorage.setItem('posera_admin_view', view);
             }, [view]);
 
-            useEffect(() => {
-                const fetchAdminData = async () => {
-                    const st = await DB.getSettings();
-                    const ord = await DB.getOrders();
-                    const sts = await DB.getSeats();
-                    
-                    for (let o of ord) {
-                        if (o.paymentMethod === 'BOOKING' && o.status === 'WAITING_VERIFICATION') {
-                            const createdTime = new Date(o.createdAt).getTime();
-                            const expiryTime = createdTime + (24 * 60 * 60 * 1000);
-                            if (new Date().getTime() > expiryTime) {
-                                await DB.updateOrderStatus(o.firestoreId, o.orderId, 'EXPIRED');
-                                o.status = 'EXPIRED';
-                            }
+            const fetchAdminData = async () => {
+                const st = await DB.getSettings();
+                const ord = await DB.getOrders();
+                const sts = await DB.getSeats();
+                
+                for (let o of ord) {
+                    if (o.paymentMethod === 'BOOKING' && o.status === 'WAITING_VERIFICATION') {
+                        const createdTime = new Date(o.createdAt).getTime();
+                        const expiryTime = createdTime + (24 * 60 * 60 * 1000);
+                        if (new Date().getTime() > expiryTime) {
+                            await DB.updateOrderStatus(o.firestoreId, o.orderId, 'EXPIRED');
+                            o.status = 'EXPIRED';
                         }
                     }
+                }
 
-                    setSettings(st);
-                    setQrisInput(st.qrisImageUrl || '');
-                    setOrders(ord);
-                    setSeats(sts);
-                };
-                
-                if (view !== 'scan') fetchAdminData();
+                setSettings(st);
+                setQrisInput(st.qrisImageUrl || '');
+                setOrders(ord);
+                setSeats(sts);
+            };
+
+            useEffect(() => {
+                // Fetch data di setiap view untuk update check-in realtime
+                fetchAdminData();
             }, [view]);
 
             // Inisialisasi Scanner ketika menu Scan aktif
@@ -997,6 +1000,8 @@
                                     const res = await DB.checkIn(decodedText);
                                     if (res.success) {
                                         setToast(`✅ ${res.msg} - Kursi ${res.data.seat} (${res.data.orderName})`, 'success');
+                                        // Refresh data tabel recent check-in secara realtime
+                                        await fetchAdminData(); 
                                     } else {
                                         setToast(`❌ ${res.msg}`, 'error');
                                     }
@@ -1098,6 +1103,34 @@
                 }
             };
 
+            // Menambahkan Fitur Export Data Spesifik Check-in ke Excel
+            const handleExportCheckIn = () => {
+                const checkInData = [];
+                orders.forEach(o => {
+                    if (o.tickets) {
+                        o.tickets.forEach(t => {
+                            if (t.status === 'USED') {
+                                checkInData.push({
+                                    "Order ID": o.orderId,
+                                    "Nama Pemesan": o.name,
+                                    "No WA": o.wa,
+                                    "ID Kursi": t.seat,
+                                    "Kategori": t.cat,
+                                    "Waktu Check-in": new Date(t.usedAt).toLocaleString('id-ID')
+                                });
+                            }
+                        });
+                    }
+                });
+
+                if (checkInData.length === 0) return setToast('Belum ada tiket yang ter-scan / check-in', 'error');
+
+                const wb = window.XLSX.utils.book_new();
+                window.XLSX.utils.book_append_sheet(wb, window.XLSX.utils.json_to_sheet(checkInData), "Daftar Hadir");
+                window.XLSX.writeFile(wb, "Rekapan_CheckIn_Sangkala.xlsx");
+                setToast('File Rekapan Check-in berhasil didownload', 'success');
+            };
+
             const handleExportExcel = () => {
                 if (orders.length === 0) return setToast('Belum ada data pesanan', 'error');
                 const wb = window.XLSX.utils.book_new();
@@ -1117,7 +1150,9 @@
                                         "Harga": t.price,
                                         "Metode Bayar": o.paymentMethod,
                                         "Status Order": o.status,
-                                        "Waktu Order": new Date(o.createdAt).toLocaleString('id-ID')
+                                        "Waktu Order": new Date(o.createdAt).toLocaleString('id-ID'),
+                                        "Status Kehadiran": t.status === 'USED' ? 'SUDAH HADIR' : 'BELUM HADIR',
+                                        "Waktu Check-in": t.usedAt ? new Date(t.usedAt).toLocaleString('id-ID') : '-'
                                     });
                                 }
                             });
@@ -1165,7 +1200,7 @@
                         <div className="flex md:flex-col gap-2 w-full shrink-0">
                             <button onClick={() => setView('orders')} className={`text-left p-2.5 md:p-3 rounded text-xs md:text-sm font-medium whitespace-nowrap ${view === 'orders' ? 'bg-posera-red text-white' : 'text-gray-300 hover:bg-gray-800'}`}>Pesanan</button>
                             <button onClick={() => setView('settings')} className={`text-left p-2.5 md:p-3 rounded text-xs md:text-sm font-medium whitespace-nowrap ${view === 'settings' ? 'bg-posera-red text-white' : 'text-gray-300 hover:bg-gray-800'}`}>Pengaturan</button>
-                            <button onClick={() => setView('scan')} className={`text-left p-2.5 md:p-3 rounded text-xs md:text-sm font-medium whitespace-nowrap ${view === 'scan' ? 'bg-posera-red text-white' : 'text-gray-300 hover:bg-gray-800'}`}>Scanner</button>
+                            <button onClick={() => setView('scan')} className={`text-left p-2.5 md:p-3 rounded text-xs md:text-sm font-medium whitespace-nowrap ${view === 'scan' ? 'bg-posera-red text-white' : 'text-gray-300 hover:bg-gray-800'}`}>Check-in / Scanner</button>
                             
                             <button onClick={() => { 
                                 localStorage.removeItem('adminAuth'); 
@@ -1179,7 +1214,7 @@
                         {view === 'orders' && (
                             <div className="fade-in">
                                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-                                    <h1 className="text-xl md:text-2xl font-bold flex items-center gap-4">
+                                    <h1 className="text-xl md:text-2xl font-bold flex flex-wrap items-center gap-4">
                                         Manajemen Pesanan 
                                         <button onClick={handleExportExcel} className="bg-green-700 hover:bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-lg flex items-center gap-2">
                                             <i className="fas fa-file-excel"></i> Export Rekapan Excel
@@ -1224,8 +1259,8 @@
                                                         <div className="text-[11px] text-gray-400 mb-1.5">{o.wa}</div>
                                                         <div className="flex flex-wrap gap-1 max-w-[200px]">
                                                             {o.tickets && o.tickets.map((t, idx) => (
-                                                                <span key={idx} className={`px-1.5 py-0.5 rounded text-[10px] font-mono border font-bold ${t.cat === 'VIP' ? 'bg-green-900/30 text-green-400 border-green-800' : t.cat === 'REGULER' ? 'bg-red-900/30 text-red-400 border-red-800' : 'bg-yellow-900/30 text-yellow-400 border-yellow-800'}`}>
-                                                                    {t.seat}
+                                                                <span key={idx} title={t.status === 'USED' ? `Check-in: ${new Date(t.usedAt).toLocaleString('id-ID')}` : 'Belum Check-in'} className={`px-1.5 py-0.5 rounded text-[10px] font-mono border font-bold ${t.cat === 'VIP' ? 'bg-green-900/30 text-green-400 border-green-800' : t.cat === 'REGULER' ? 'bg-red-900/30 text-red-400 border-red-800' : 'bg-yellow-900/30 text-yellow-400 border-yellow-800'} ${t.status === 'USED' ? 'opacity-50' : ''}`}>
+                                                                    {t.seat} {t.status === 'USED' && '✅'}
                                                                 </span>
                                                             ))}
                                                         </div>
@@ -1293,10 +1328,50 @@
                         )}
 
                         {view === 'scan' && (
-                            <div className="max-w-xl mx-auto fade-in">
-                                <h1 className="text-xl md:text-2xl font-bold mb-4">Scanner QR/Barcode</h1>
-                                <p className="text-sm text-gray-400 mb-4">Silakan izinkan akses kamera jika browser memintanya. Pilih kamera yang sesuai dari menu dropdown di bawah (Mendukung Kamera Internal/Eksternal/Webcam).</p>
-                                <div id="qr-reader-admin" className="w-full min-h-[300px] border border-gray-700 rounded-xl overflow-hidden shadow-2xl"></div>
+                            <div className="max-w-4xl mx-auto fade-in">
+                                <div className="flex flex-col lg:flex-row gap-6">
+                                    {/* Bagian Scanner */}
+                                    <div className="w-full lg:w-1/2">
+                                        <h1 className="text-xl md:text-2xl font-bold mb-4">Scanner QR/Barcode</h1>
+                                        <p className="text-sm text-gray-400 mb-4">Silakan izinkan akses kamera jika browser memintanya. Pilih kamera yang sesuai dari menu dropdown di bawah (Mendukung Kamera Internal/Eksternal/Webcam).</p>
+                                        <div id="qr-reader-admin" className="w-full min-h-[300px] border border-gray-700 rounded-xl overflow-hidden shadow-2xl"></div>
+                                    </div>
+                                    
+                                    {/* Bagian Daftar Kehadiran / Log Checkin */}
+                                    <div className="w-full lg:w-1/2 bg-posera-gray p-4 rounded-xl border border-gray-800">
+                                        <div className="flex justify-between items-center mb-4 border-b border-gray-800 pb-2">
+                                            <h2 className="text-lg font-bold text-posera-gold">Log Hadir Terkini</h2>
+                                            <button onClick={handleExportCheckIn} className="bg-green-700 hover:bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-lg flex items-center gap-2">
+                                                <i className="fas fa-download"></i> Unduh Hadir
+                                            </button>
+                                        </div>
+                                        <div className="max-h-[400px] overflow-y-auto pr-2 hide-scrollbar">
+                                            {orders.flatMap(o => (o.tickets || []).filter(t => t.status === 'USED').map(t => ({...t, name: o.name, orderId: o.orderId})))
+                                                .sort((a, b) => new Date(b.usedAt) - new Date(a.usedAt)) // Urut dari yang terbaru
+                                                .map((t, idx) => (
+                                                <div key={idx} className="bg-black p-3 rounded-lg mb-2 border border-gray-800 text-sm flex justify-between items-center fade-in">
+                                                    <div>
+                                                        <div className="font-bold text-white mb-0.5">{t.name}</div>
+                                                        <div className="text-[10px] text-gray-400">
+                                                            <i className="fas fa-clock mr-1"></i> 
+                                                            {new Date(t.usedAt).toLocaleString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} WIB
+                                                        </div>
+                                                    </div>
+                                                    <span className={`px-2.5 py-1 rounded-full text-xs font-bold border ${t.cat === 'VIP' ? 'bg-green-900/30 text-green-400 border-green-800' : t.cat === 'REGULER' ? 'bg-red-900/30 text-red-400 border-red-800' : 'bg-yellow-900/30 text-yellow-400 border-yellow-800'}`}>
+                                                        {t.seat}
+                                                    </span>
+                                                </div>
+                                            ))}
+                                            
+                                            {orders.flatMap(o => (o.tickets || []).filter(t => t.status === 'USED')).length === 0 && (
+                                                <div className="text-center text-gray-500 text-sm mt-10">
+                                                    <i className="fas fa-history text-3xl mb-3 block opacity-50"></i>
+                                                    Belum ada tiket yang ter-scan / hadir.
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         )}
 
