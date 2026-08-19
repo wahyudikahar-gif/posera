@@ -203,7 +203,7 @@
                     for (let t of order.tickets) {
                         const seat = seats.find(s => s.id === t.seat);
                         if (!seat || seat.status !== 'AVAILABLE') {
-                            throw new Error(`Maaf, kursi ${t.seat} baru saja dipesan orang lain.`);
+                            throw new Error(`Maaf, kursi ${t.seat} baru saja dipesan orang lain. Silakan pilih kursi lain.`);
                         }
                     }
 
@@ -263,7 +263,10 @@
                             } else if (status === 'REJECTED' || status === 'CANCELLED' || status === 'EXPIRED') {
                                 targetOrder.tickets.forEach(t => {
                                     const idx = seats.findIndex(s => s.id === t.seat);
-                                    if(idx > -1) { seats[idx].status = 'AVAILABLE'; modified = true; }
+                                    // PENTING: Hanya bebaskan kursi jika belum di-book secara lunas (SOLD) oleh orang lain.
+                                    if(idx > -1 && seats[idx].status !== 'SOLD') { 
+                                        seats[idx].status = 'AVAILABLE'; modified = true; 
+                                    }
                                 });
                             }
                             
@@ -299,7 +302,9 @@
                             ordersToDelete.forEach(o => {
                                 o.data.tickets.forEach(t => {
                                     const seatIdx = seats.findIndex(s => s.id === t.seat);
-                                    if(seatIdx > -1) { seats[seatIdx].status = 'AVAILABLE'; modified = true; }
+                                    if(seatIdx > -1 && seats[seatIdx].status !== 'SOLD') { 
+                                        seats[seatIdx].status = 'AVAILABLE'; modified = true; 
+                                    }
                                 });
                             });
                             
@@ -504,7 +509,12 @@
             const rightWingSeats = filteredSeats.slice(halfIdx);
 
             const toggleSeat = (seat) => {
+                // Notifikasi Peringatan jika diklik (Req 3)
+                if(seat.status === 'SOLD') return setToast('Maaf, kursi ini sudah Terjual dan Terbayar.', 'error');
+                if(seat.status === 'RESERVED') return setToast('Maaf, kursi ini sedang dipesan orang lain (Menunggu Verifikasi).', 'error');
+                
                 if(seat.status !== 'AVAILABLE') return;
+                
                 if(selectedSeats.find(s => s.id === seat.id)) {
                     setSelectedSeats(selectedSeats.filter(s => s.id !== seat.id));
                 } else {
@@ -514,8 +524,8 @@
             };
 
             const getSeatColors = (seat, isSelected) => {
-                if(seat.status === 'RESERVED') return 'bg-red-900 text-gray-300 border-red-950 cursor-not-allowed';
-                if(seat.status === 'SOLD') return 'bg-gray-800 text-gray-600 border-gray-900 cursor-not-allowed';
+                if(seat.status === 'RESERVED') return 'bg-red-900 text-gray-300 border-red-950 cursor-not-allowed opacity-80';
+                if(seat.status === 'SOLD') return 'bg-gray-800 text-gray-600 border-gray-900 cursor-not-allowed opacity-60';
                 if(isSelected) return 'bg-posera-gold text-black border-posera-gold font-bold scale-110 shadow-[0_0_10px_rgba(212,175,55,0.6)] cursor-pointer';
                 
                 if(seat.cat === 'VIP') return 'border-green-600/60 text-green-500 hover:border-green-400 hover:text-green-400 hover:shadow-[0_0_12px_rgba(34,197,94,0.5)] cursor-pointer hover:scale-110';
@@ -528,8 +538,40 @@
             const handleFileChange = (e) => {
                 const file = e.target.files[0];
                 if (file) {
+                    // Implementasi Client-side Image Compression (Req 4)
                     const reader = new FileReader();
-                    reader.onloadend = () => setPaymentProof(reader.result);
+                    reader.onload = (event) => {
+                        const img = new Image();
+                        img.onload = () => {
+                            const canvas = document.createElement('canvas');
+                            const MAX_WIDTH = 800;
+                            const MAX_HEIGHT = 800;
+                            let width = img.width;
+                            let height = img.height;
+
+                            if (width > height) {
+                                if (width > MAX_WIDTH) {
+                                    height *= MAX_WIDTH / width;
+                                    width = MAX_WIDTH;
+                                }
+                            } else {
+                                if (height > MAX_HEIGHT) {
+                                    width *= MAX_HEIGHT / height;
+                                    height = MAX_HEIGHT;
+                                }
+                            }
+
+                            canvas.width = width;
+                            canvas.height = height;
+                            const ctx = canvas.getContext('2d');
+                            ctx.drawImage(img, 0, 0, width, height);
+                            
+                            // Kompresi menjadi JPEG dengan kualitas 60%
+                            const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.6);
+                            setPaymentProof(compressedDataUrl);
+                        };
+                        img.src = event.target.result;
+                    };
                     reader.readAsDataURL(file);
                 }
             };
@@ -728,6 +770,7 @@
                                     <div className="mb-6">
                                         <label className="block text-sm text-gray-400 mb-2">Upload Bukti Pembayaran *</label>
                                         <input type="file" accept="image/*" onChange={handleFileChange} className="w-full bg-black border border-gray-700 rounded-lg p-2 text-sm text-gray-300 focus:outline-none" />
+                                        <p className="text-[10px] text-gray-500 mt-1">Ukuran gambar akan otomatis dikompres untuk menghemat penyimpanan.</p>
                                     </div>
                                 )}
                                 
@@ -948,6 +991,9 @@
             const [previewImage, setPreviewImage] = useState(null);
             const [isSyncing, setIsSyncing] = useState(false);
             const isScanningRef = useRef(false);
+            
+            // Tambahan State untuk Filter Table (Req 6)
+            const [filterStatus, setFilterStatus] = useState('ALL');
 
             useEffect(() => {
                 localStorage.setItem('posera_admin_view', view);
@@ -1025,7 +1071,7 @@
             }, [view]);
 
             const handleSyncSeats = async () => {
-                if(!confirm("Yakin ingin mensinkronkan ulang kursi dengan data pesanan? Fitur ini akan mencari semua pesanan Anda dan mewarnai kembali kursi di denah secara otomatis.")) return;
+                if(!confirm("Yakin ingin mensinkronkan ulang (Kunci) kursi dengan data pesanan? Fitur ini akan mendeteksi tiket yang sudah PAID dan langsung menguncinya menjadi SOLD, mencegah pemesanan ganda secara permanen.")) return;
                 
                 setIsSyncing(true);
                 try {
@@ -1037,14 +1083,29 @@
                     
                     let seatsList = snap.data().list;
                     
+                    // Reset semua jadi available
                     seatsList.forEach(s => s.status = 'AVAILABLE');
                     
+                    // Algoritma Prioritas Absolut (Req 1 & 2): 
+                    // 1. Terapkan RESERVED (Waiting Verification)
                     orders.forEach(o => {
-                        if(o.status === 'PAID' || o.status === 'WAITING_VERIFICATION') {
+                        if(o.status === 'WAITING_VERIFICATION') {
                             o.tickets?.forEach(t => {
                                 const idx = seatsList.findIndex(s => s.id === t.seat);
                                 if(idx > -1) {
-                                    seatsList[idx].status = (o.status === 'PAID') ? 'SOLD' : 'RESERVED';
+                                    seatsList[idx].status = 'RESERVED';
+                                }
+                            });
+                        }
+                    });
+
+                    // 2. Terapkan SOLD (Paid/Lunas) menimpa apapun status sebelumnya
+                    orders.forEach(o => {
+                        if(o.status === 'PAID') {
+                            o.tickets?.forEach(t => {
+                                const idx = seatsList.findIndex(s => s.id === t.seat);
+                                if(idx > -1) {
+                                    seatsList[idx].status = 'SOLD';
                                 }
                             });
                         }
@@ -1052,7 +1113,7 @@
                     
                     await setDoc(seatDocRef, { list: seatsList });
                     setSeats(seatsList);
-                    setToast('Sinkronisasi Berhasil! Kursi yang sudah dibeli kembali terisi.', 'success');
+                    setToast('Sinkronisasi Kunci Berhasil! Tiket Lunas telah dikunci penuh.', 'success');
                 } catch(e) {
                     setToast('Gagal melakukan sinkronisasi: ' + e.message, 'error');
                 } finally {
@@ -1070,7 +1131,7 @@
             };
 
             const handleSelectAll = (e) => {
-                if (e.target.checked) setSelectedOrderIds(orders.map(o => o.orderId));
+                if (e.target.checked) setSelectedOrderIds(filteredOrders.map(o => o.orderId));
                 else setSelectedOrderIds([]);
             };
 
@@ -1192,6 +1253,9 @@
                     setToast('Konfirmasi salah, reset dibatalkan.', 'error');
                 }
             };
+            
+            // Logika Filter (Req 6)
+            const filteredOrders = orders.filter(o => filterStatus === 'ALL' || o.status === filterStatus);
 
             return (
                 <div className="flex flex-col md:flex-row h-screen bg-[#050505] overflow-hidden">
@@ -1199,7 +1263,7 @@
                         <h2 className="text-lg md:text-xl font-cinematic font-bold text-posera-gold p-2 md:p-4 text-center shrink-0 mr-4 md:mr-0">ADMIN</h2>
                         <div className="flex md:flex-col gap-2 w-full shrink-0">
                             <button onClick={() => setView('orders')} className={`text-left p-2.5 md:p-3 rounded text-xs md:text-sm font-medium whitespace-nowrap ${view === 'orders' ? 'bg-posera-red text-white' : 'text-gray-300 hover:bg-gray-800'}`}>Pesanan</button>
-                            <button onClick={() => setView('settings')} className={`text-left p-2.5 md:p-3 rounded text-xs md:text-sm font-medium whitespace-nowrap ${view === 'settings' ? 'bg-posera-red text-white' : 'text-gray-300 hover:bg-gray-800'}`}>Pengaturan</button>
+                            <button onClick={() => setView('settings')} className={`text-left p-2.5 md:p-3 rounded text-xs md:text-sm font-medium whitespace-nowrap ${view === 'settings' ? 'bg-posera-red text-white' : 'text-gray-300 hover:bg-gray-800'}`}>Pengaturan & Kunci</button>
                             <button onClick={() => setView('scan')} className={`text-left p-2.5 md:p-3 rounded text-xs md:text-sm font-medium whitespace-nowrap ${view === 'scan' ? 'bg-posera-red text-white' : 'text-gray-300 hover:bg-gray-800'}`}>Check-in / Scanner</button>
                             
                             <button onClick={() => { 
@@ -1213,7 +1277,7 @@
                     <div className="flex-1 overflow-y-auto p-4 md:p-8 relative">
                         {view === 'orders' && (
                             <div className="fade-in">
-                                <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+                                <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-6 gap-4 border-b border-gray-800 pb-4">
                                     <h1 className="text-xl md:text-2xl font-bold flex flex-wrap items-center gap-4">
                                         Manajemen Pesanan 
                                         <button onClick={handleExportExcel} className="bg-green-700 hover:bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-lg flex items-center gap-2">
@@ -1221,16 +1285,34 @@
                                         </button>
                                     </h1>
                                     
-                                    {selectedOrderIds.length > 0 && (
-                                        <div className="flex flex-wrap gap-2">
-                                            <button onClick={handleBulkVerify} className="bg-green-600 hover:bg-green-700 text-white px-3 md:px-4 py-2 rounded-lg text-xs font-bold transition shadow">
-                                                <i className="fas fa-check-circle mr-1"></i> Verifikasi ({selectedOrderIds.length})
-                                            </button>
-                                            <button onClick={handleBulkDelete} className="bg-red-600 hover:bg-red-700 text-white px-3 md:px-4 py-2 rounded-lg text-xs font-bold transition shadow">
-                                                <i className="fas fa-trash-alt mr-1"></i> Hapus ({selectedOrderIds.length})
-                                            </button>
+                                    <div className="flex flex-wrap gap-3 items-center w-full lg:w-auto">
+                                        {/* Dropdown Filter Req 6 */}
+                                        <div className="flex items-center gap-2 bg-gray-900 border border-gray-700 rounded-lg p-1">
+                                            <span className="text-xs text-gray-400 pl-2">Filter:</span>
+                                            <select 
+                                                value={filterStatus} 
+                                                onChange={(e) => setFilterStatus(e.target.value)}
+                                                className="bg-transparent text-white text-xs p-1 outline-none font-bold"
+                                            >
+                                                <option value="ALL">Semua Tiket</option>
+                                                <option value="PAID">Sudah Lunas (PAID)</option>
+                                                <option value="WAITING_VERIFICATION">Menunggu Verifikasi</option>
+                                                <option value="EXPIRED">Kadaluarsa</option>
+                                                <option value="CANCELLED">Dibatalkan</option>
+                                            </select>
                                         </div>
-                                    )}
+
+                                        {selectedOrderIds.length > 0 && (
+                                            <div className="flex flex-wrap gap-2">
+                                                <button onClick={handleBulkVerify} className="bg-green-600 hover:bg-green-700 text-white px-3 md:px-4 py-1.5 rounded-lg text-xs font-bold transition shadow">
+                                                    <i className="fas fa-check-circle mr-1"></i> Verif ({selectedOrderIds.length})
+                                                </button>
+                                                <button onClick={handleBulkDelete} className="bg-red-600 hover:bg-red-700 text-white px-3 md:px-4 py-1.5 rounded-lg text-xs font-bold transition shadow">
+                                                    <i className="fas fa-trash-alt mr-1"></i> Hapus ({selectedOrderIds.length})
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
 
                                 <div className="bg-posera-gray rounded-xl overflow-x-auto border border-gray-800 shadow-xl">
@@ -1238,7 +1320,7 @@
                                         <thead className="bg-black text-gray-400">
                                             <tr>
                                                 <th className="p-3 md:p-4 w-10 text-center">
-                                                    <input type="checkbox" onChange={handleSelectAll} checked={orders.length > 0 && selectedOrderIds.length === orders.length} className="cursor-pointer accent-posera-red w-4 h-4" />
+                                                    <input type="checkbox" onChange={handleSelectAll} checked={filteredOrders.length > 0 && selectedOrderIds.length === filteredOrders.length} className="cursor-pointer accent-posera-red w-4 h-4" />
                                                 </th>
                                                 <th className="p-3 md:p-4">ID Transaksi</th>
                                                 <th className="p-3 md:p-4">Nama / Detail Nomor Kursi</th>
@@ -1248,7 +1330,7 @@
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-gray-800">
-                                            {orders.map(o => (
+                                            {filteredOrders.map(o => (
                                                 <tr key={o.orderId} className="hover:bg-gray-900/50 transition">
                                                     <td className="p-3 md:p-4 text-center">
                                                         <input type="checkbox" checked={selectedOrderIds.includes(o.orderId)} onChange={() => handleCheckboxChange(o.orderId)} className="cursor-pointer accent-posera-red w-4 h-4" />
@@ -1279,16 +1361,19 @@
                                                         <span className={`px-2.5 py-1 rounded-full text-[10px] md:text-xs font-bold uppercase ${o.status === 'PAID' ? 'bg-green-900/50 text-green-400 border border-green-700/50' : o.status === 'EXPIRED' ? 'bg-red-900/50 text-red-400 border border-red-700/50' : o.status === 'CANCELLED' ? 'bg-red-900/50 text-red-400 border border-red-700/50' : 'bg-yellow-900/50 text-yellow-400 border border-yellow-700/50'}`}>{o.status}</span>
                                                     </td>
                                                     <td className="p-3 md:p-4 text-center">
-                                                        {o.status === 'WAITING_VERIFICATION' && (
-                                                            <div className="flex flex-col gap-1.5 min-w-[80px]">
+                                                        <div className="flex flex-col gap-1.5 min-w-[80px]">
+                                                            {o.status === 'WAITING_VERIFICATION' && (
                                                                 <button onClick={() => handleStatusChange(o.orderId, 'PAID')} className="bg-green-600 hover:bg-green-700 text-white px-2 py-1.5 rounded text-xs font-bold shadow transition w-full">Verifikasi</button>
-                                                                <button onClick={() => handleStatusChange(o.orderId, 'CANCELLED')} className="bg-red-600 hover:bg-red-700 text-white px-2 py-1.5 rounded text-xs font-bold shadow transition w-full">Batalkan</button>
-                                                            </div>
-                                                        )}
+                                                            )}
+                                                            {/* Admin kini bisa membatalkan kapanpun (Req 5) meskipun sudah dibayar */}
+                                                            {(o.status === 'WAITING_VERIFICATION' || o.status === 'PAID') && (
+                                                                <button onClick={() => handleStatusChange(o.orderId, 'CANCELLED')} className="bg-red-800 hover:bg-red-700 border border-red-600 text-white px-2 py-1.5 rounded text-xs font-bold shadow transition w-full">Batalkan</button>
+                                                            )}
+                                                        </div>
                                                     </td>
                                                 </tr>
                                             ))}
-                                            {orders.length === 0 && <tr><td colSpan="6" className="text-center p-8 text-gray-500">Belum ada data pesanan.</td></tr>}
+                                            {filteredOrders.length === 0 && <tr><td colSpan="6" className="text-center p-8 text-gray-500">Tidak ada data pesanan pada kategori ini.</td></tr>}
                                         </tbody>
                                     </table>
                                 </div>
@@ -1306,12 +1391,12 @@
                                 </div>
 
                                 <div className="bg-posera-gray p-6 rounded-2xl border border-blue-900/50">
-                                    <h1 className="text-xl md:text-2xl font-bold mb-2 text-blue-500">Sinkronisasi Kursi</h1>
+                                    <h1 className="text-xl md:text-2xl font-bold mb-2 text-blue-500">Sinkronisasi & Kunci Kursi (Fix Double Booking)</h1>
                                     <p className="text-sm text-gray-400 mb-4 leading-relaxed">
-                                        Gunakan fitur ini jika kursi pada denah panggung tiba-tiba kosong padahal sudah ada pembeli. Sistem akan otomatis mengisi kembali kursi di panggung sesuai dengan data Pesanan.
+                                        Jika terjadi *bug double booking* atau kursi yang lunas kembali bisa dipesan. Tekan tombol ini. Sistem akan mendeteksi <b>semua pesanan Lunas (PAID)</b> dan <b>memaksa penguncian (SOLD)</b> secara absolut pada database.
                                     </p>
                                     <button onClick={handleSyncSeats} disabled={isSyncing} className="w-full bg-blue-700 hover:bg-blue-600 text-white py-3.5 rounded-lg font-bold transition shadow-lg flex justify-center items-center gap-2">
-                                        {isSyncing ? <div className="loader"></div> : <><i className="fas fa-sync-alt"></i> Sinkronkan Kursi Sekarang</>}
+                                        {isSyncing ? <div className="loader"></div> : <><i className="fas fa-lock"></i> Sinkronkan & Kunci Kursi Lunas</>}
                                     </button>
                                 </div>
 
