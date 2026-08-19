@@ -5,10 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>POSERA - SANGKALA Performance Art</title>
     
+    <!-- Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     
+    <!-- Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -32,19 +35,23 @@
         }
     </script>
 
+    <!-- React & ReactDOM -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     
+    <!-- Babel for JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
+    <!-- QR Code, Barcode, Excel, & HTML2Canvas Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
     <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.0/dist/JsBarcode.all.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 
+    <!-- Firebase SDK & Inisialisasi -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        // PERBAIKAN: Menambahkan import query dan where
         import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, getDocs, addDoc, deleteDoc, runTransaction, query, where } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         const firebaseConfig = {
@@ -60,7 +67,6 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
 
-        // PERBAIKAN: Menambahkan query dan where ke window.FB
         window.FB = {
             db, doc, getDoc, setDoc, updateDoc, collection, getDocs, addDoc, deleteDoc, runTransaction, query, where
         };
@@ -104,6 +110,11 @@
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         .fade-in { animation: fadeIn 0.5s ease-in; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        
+        /* Scanner Admin Custom Style */
+        #qr-reader-admin { background: white; color: black; padding: 1rem; }
+        #qr-reader-admin select { margin-bottom: 10px; padding: 5px; border-radius: 5px; }
+        #qr-reader-admin button { background: #8B0000; color: white; padding: 8px 16px; border-radius: 5px; border: none; font-weight: bold; cursor: pointer; }
     </style>
 </head>
 <body>
@@ -208,7 +219,6 @@
                 await addDoc(collection(db, "posera_orders"), order);
             },
             
-            // PERBAIKAN: Menggunakan Query agar tidak boros kuota harian Firebase
             updateOrderStatus: async (orderFirestoreId, orderId, status) => {
                 const { db, doc, updateDoc, collection, getDocs, runTransaction, query, where, getDoc } = window.FB;
                 
@@ -319,7 +329,7 @@
             },
 
             checkIn: async (token) => {
-                const { db, doc, setDoc, collection, getDocs } = window.FB;
+                const { db, doc, updateDoc, collection, getDocs } = window.FB;
                 const snap = await getDocs(collection(db, "posera_orders"));
                 let foundTicket = null;
                 let foundOrderDocId = null;
@@ -336,13 +346,13 @@
                     }
                 });
 
-                if (!foundTicket) return { success: false, msg: 'TIKET TIDAK VALID' };
+                if (!foundTicket) return { success: false, msg: 'TIKET TIDAK DITEMUKAN / BELUM LUNAS' };
                 if (foundTicket.status === 'USED') return { success: false, msg: 'TIKET SUDAH DIGUNAKAN', data: foundTicket };
                 
                 foundTicket.status = 'USED';
                 foundTicket.usedAt = new Date().toISOString();
                 
-                await setDoc(doc(db, "posera_orders", foundOrderDocId), foundOrderData);
+                await updateDoc(doc(db, "posera_orders", foundOrderDocId), { tickets: foundOrderData.tickets });
                 return { success: true, msg: 'CHECK-IN BERHASIL', data: { ...foundTicket, orderName: foundOrderData.name } };
             }
         };
@@ -388,7 +398,8 @@
             useEffect(() => {
                 const calculateTime = () => {
                     const createdTime = new Date(createdAt).getTime();
-                    const expiryTime = createdTime + (48 * 60 * 60 * 1000); // 48 Jam
+                    // Durasi Booking diubah menjadi 24 Jam
+                    const expiryTime = createdTime + (24 * 60 * 60 * 1000); 
                     const now = new Date().getTime();
                     const difference = expiryTime - now;
 
@@ -708,7 +719,7 @@
                                                 <i className="fas fa-exclamation-triangle"></i> PERHATIAN BOOKING TIKET:
                                             </div>
                                             <p className="text-gray-300 leading-relaxed">
-                                                Tiket yang dibooking memiliki **batas waktu pembayaran maksimal 48 jam**. Jika melewati batas waktu tersebut dan belum melakukan pelunasan/konfirmasi, sistem akan otomatis membatalkan pemesanan dan kursi akan dibuka kembali untuk umum.
+                                                Tiket yang dibooking memiliki **batas waktu pembayaran maksimal 24 jam**. Jika melewati batas waktu tersebut dan belum melakukan pelunasan/konfirmasi, sistem akan otomatis membatalkan pemesanan dan kursi akan dibuka kembali untuk umum.
                                             </p>
                                         </div>
                                     )}
@@ -762,7 +773,7 @@
                 if(found) {
                     if (found.paymentMethod === 'BOOKING' && found.status === 'WAITING_VERIFICATION') {
                         const createdTime = new Date(found.createdAt).getTime();
-                        const expiryTime = createdTime + (48 * 60 * 60 * 1000);
+                        const expiryTime = createdTime + (24 * 60 * 60 * 1000);
                         if (new Date().getTime() > expiryTime) {
                             await DB.updateOrderStatus(found.firestoreId, found.orderId, 'EXPIRED');
                             found.status = 'EXPIRED';
@@ -785,6 +796,31 @@
                     setToast('Gagal membatalkan pesanan: ' + error.message, 'error');
                 } finally {
                     setIsCancelling(false);
+                }
+            };
+
+            // Fungsi untuk mengunduh gambar tiket menggunakan HTML2Canvas
+            const handleDownloadTicket = async (tokenId, seatInfo) => {
+                const element = document.getElementById(`ticket-${tokenId}`);
+                if (element && window.html2canvas) {
+                    try {
+                        const canvas = await window.html2canvas(element, { 
+                            backgroundColor: '#0a0a0a', 
+                            scale: 2,
+                            useCORS: true 
+                        });
+                        const image = canvas.toDataURL("image/jpeg", 0.9);
+                        const link = document.createElement('a');
+                        link.href = image;
+                        link.download = `TIKET-SANGKALA-${seatInfo}.jpg`;
+                        link.click();
+                        setToast(`Tiket ${seatInfo} berhasil disimpan!`, 'success');
+                    } catch (e) {
+                        setToast('Gagal memproses gambar tiket', 'error');
+                        console.error(e);
+                    }
+                } else {
+                    setToast('Sistem download belum siap. Harap tunggu sebentar.', 'error');
                 }
             };
 
@@ -832,7 +868,7 @@
                             
                             {order.status === 'EXPIRED' && (
                                 <div className="bg-red-950/40 border border-red-800/60 p-4 rounded-xl text-center text-red-300 text-sm mb-6">
-                                    <i className="fas fa-ban mr-2"></i> Batas waktu pembayaran 48 jam telah terlewati. Pesanan dibatalkan otomatis dan kursi telah dikembalikan ke sistem.
+                                    <i className="fas fa-ban mr-2"></i> Batas waktu pembayaran 24 jam telah terlewati. Pesanan dibatalkan otomatis dan kursi telah dikembalikan ke sistem.
                                 </div>
                             )}
 
@@ -849,22 +885,30 @@
                                         const borderColor = t.cat === 'VIP' ? 'border-green-500/30' : t.cat === 'REGULER' ? 'border-red-500/30' : 'border-yellow-500/30';
                                         
                                         return (
-                                        <div key={idx} className="bg-black rounded-2xl border border-gray-800 overflow-hidden flex flex-col sm:flex-row relative shadow-lg">
-                                            <div className="sm:w-2/5 w-full bg-gray-900 border-b sm:border-b-0 sm:border-r border-gray-800 relative h-36 sm:h-auto flex flex-col justify-center items-center p-4">
-                                                <img src="WhatsApp Image 2026-08-18 at 09.03.04.jpeg" alt="Logo" className="absolute inset-0 w-full h-full object-cover opacity-30 blur-[2px]" onError={(e)=>{e.target.style.display='none';}} />
-                                                <div className={`relative z-10 text-center bg-black/80 p-3 rounded-xl w-full border ${borderColor}`}>
-                                                    <p className={`font-bold uppercase tracking-widest mb-1 text-xs ${catColor}`}>{t.cat}</p>
-                                                    <p className="text-2xl sm:text-3xl font-cinematic font-bold text-white drop-shadow-md">{t.seat}</p>
-                                                    <p className="text-[10px] text-gray-400 mt-1">Nomor Kursi Teater</p>
+                                        <div key={idx} className="flex flex-col gap-3">
+                                            {/* Container TIKET yang akan diunduh */}
+                                            <div id={`ticket-${t.qrToken}`} className="bg-black rounded-2xl border border-gray-800 overflow-hidden flex flex-col sm:flex-row relative shadow-lg">
+                                                <div className="sm:w-2/5 w-full bg-gray-900 border-b sm:border-b-0 sm:border-r border-gray-800 relative h-36 sm:h-auto flex flex-col justify-center items-center p-4">
+                                                    <img src="WhatsApp Image 2026-08-18 at 09.03.04.jpeg" alt="Logo" className="absolute inset-0 w-full h-full object-cover opacity-30 blur-[2px]" onError={(e)=>{e.target.style.display='none';}} />
+                                                    <div className={`relative z-10 text-center bg-black/80 p-3 rounded-xl w-full border ${borderColor}`}>
+                                                        <p className={`font-bold uppercase tracking-widest mb-1 text-xs ${catColor}`}>{t.cat}</p>
+                                                        <p className="text-2xl sm:text-3xl font-cinematic font-bold text-white drop-shadow-md">{t.seat}</p>
+                                                        <p className="text-[10px] text-gray-400 mt-1">Nomor Kursi Teater</p>
+                                                    </div>
+                                                </div>
+                                                <div className="p-5 flex-1 flex flex-col items-center justify-center relative bg-[#0a0a0a]">
+                                                    <div className="w-full bg-white p-3 rounded-xl flex flex-col items-center gap-3 border border-gray-300 mt-2">
+                                                        <BarcodeDisplay value={t.qrToken} />
+                                                        <QRCodeDisplay value={t.qrToken} />
+                                                    </div>
+                                                    <p className="text-[10px] text-gray-500 font-mono mt-3 border-t border-gray-800 pt-2 w-full text-center">Token: {t.qrToken}</p>
                                                 </div>
                                             </div>
-                                            <div className="p-5 flex-1 flex flex-col items-center justify-center relative bg-[#0a0a0a]">
-                                                <div className="w-full bg-white p-3 rounded-xl flex flex-col items-center gap-3 border border-gray-300 mt-2">
-                                                    <BarcodeDisplay value={t.qrToken} />
-                                                    <QRCodeDisplay value={t.qrToken} />
-                                                </div>
-                                                <p className="text-[10px] text-gray-500 font-mono mt-3 border-t border-gray-800 pt-2 w-full text-center">Token: {t.qrToken}</p>
-                                            </div>
+                                            
+                                            {/* Tombol Download (Tidak ikut diunduh di dalam gambar) */}
+                                            <button onClick={() => handleDownloadTicket(t.qrToken, t.seat)} className="w-full bg-posera-gold hover:bg-yellow-600 text-black font-bold py-2.5 rounded-xl text-sm transition shadow-lg flex items-center justify-center gap-2">
+                                                <i className="fas fa-download"></i> Simpan Gambar Tiket
+                                            </button>
                                         </div>
                                     )})}
                                 </div>
@@ -901,6 +945,7 @@
             const [selectedOrderIds, setSelectedOrderIds] = useState([]);
             const [previewImage, setPreviewImage] = useState(null);
             const [isSyncing, setIsSyncing] = useState(false);
+            const isScanningRef = useRef(false);
 
             useEffect(() => {
                 localStorage.setItem('posera_admin_view', view);
@@ -915,7 +960,7 @@
                     for (let o of ord) {
                         if (o.paymentMethod === 'BOOKING' && o.status === 'WAITING_VERIFICATION') {
                             const createdTime = new Date(o.createdAt).getTime();
-                            const expiryTime = createdTime + (48 * 60 * 60 * 1000);
+                            const expiryTime = createdTime + (24 * 60 * 60 * 1000);
                             if (new Date().getTime() > expiryTime) {
                                 await DB.updateOrderStatus(o.firestoreId, o.orderId, 'EXPIRED');
                                 o.status = 'EXPIRED';
@@ -928,7 +973,50 @@
                     setOrders(ord);
                     setSeats(sts);
                 };
-                fetchAdminData();
+                
+                if (view !== 'scan') fetchAdminData();
+            }, [view]);
+
+            // Inisialisasi Scanner ketika menu Scan aktif
+            useEffect(() => {
+                let scanner = null;
+                if (view === 'scan') {
+                    setTimeout(() => {
+                        scanner = new window.Html5QrcodeScanner(
+                            "qr-reader-admin", 
+                            { fps: 10, qrbox: {width: 250, height: 250}, rememberLastUsedCamera: true }, 
+                            false
+                        );
+                        scanner.render(
+                            async (decodedText) => {
+                                // Mencegah scan berulang beruntun
+                                if (isScanningRef.current) return;
+                                isScanningRef.current = true;
+                                
+                                try {
+                                    const res = await DB.checkIn(decodedText);
+                                    if (res.success) {
+                                        setToast(`✅ ${res.msg} - Kursi ${res.data.seat} (${res.data.orderName})`, 'success');
+                                    } else {
+                                        setToast(`❌ ${res.msg}`, 'error');
+                                    }
+                                } catch (error) {
+                                    setToast('Sistem error saat memproses tiket', 'error');
+                                }
+                                
+                                // Jeda 3 detik sebelum bisa scan tiket selanjutnya
+                                setTimeout(() => { isScanningRef.current = false; }, 3000);
+                            },
+                            (err) => { /* Abaikan pesan error berkelanjutan dari background scanning */ }
+                        );
+                    }, 200);
+                }
+                
+                return () => {
+                    if (scanner) {
+                        scanner.clear().catch(e => console.error("Gagal membersihkan scanner", e));
+                    }
+                };
             }, [view]);
 
             const handleSyncSeats = async () => {
@@ -968,7 +1056,7 @@
             };
 
             const handleStatusChange = async (orderId, status) => {
-                if(confirm(`Yakin merubah status menjadi ${status}?`)) {
+                if(confirm(`Yakin merubah status pesanan ini menjadi ${status}?`)) {
                     await DB.updateOrderStatus(null, orderId, status);
                     setToast('Status berhasil diubah', 'success');
                     const ord = await DB.getOrders();
@@ -1157,7 +1245,10 @@
                                                     </td>
                                                     <td className="p-3 md:p-4 text-center">
                                                         {o.status === 'WAITING_VERIFICATION' && (
-                                                            <button onClick={() => handleStatusChange(o.orderId, 'PAID')} className="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow transition">Verifikasi</button>
+                                                            <div className="flex flex-col gap-1.5 min-w-[80px]">
+                                                                <button onClick={() => handleStatusChange(o.orderId, 'PAID')} className="bg-green-600 hover:bg-green-700 text-white px-2 py-1.5 rounded text-xs font-bold shadow transition w-full">Verifikasi</button>
+                                                                <button onClick={() => handleStatusChange(o.orderId, 'CANCELLED')} className="bg-red-600 hover:bg-red-700 text-white px-2 py-1.5 rounded text-xs font-bold shadow transition w-full">Batalkan</button>
+                                                            </div>
                                                         )}
                                                     </td>
                                                 </tr>
@@ -1204,7 +1295,8 @@
                         {view === 'scan' && (
                             <div className="max-w-xl mx-auto fade-in">
                                 <h1 className="text-xl md:text-2xl font-bold mb-4">Scanner QR/Barcode</h1>
-                                <div id="qr-reader-admin" className="w-full min-h-[300px] bg-black border border-gray-700 rounded-xl"></div>
+                                <p className="text-sm text-gray-400 mb-4">Silakan izinkan akses kamera jika browser memintanya. Pilih kamera yang sesuai dari menu dropdown di bawah (Mendukung Kamera Internal/Eksternal/Webcam).</p>
+                                <div id="qr-reader-admin" className="w-full min-h-[300px] border border-gray-700 rounded-xl overflow-hidden shadow-2xl"></div>
                             </div>
                         )}
 
