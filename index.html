@@ -244,7 +244,7 @@
                         targetOrder.tickets = targetOrder.tickets.map(t => ({
                             ...t, 
                             qrToken: t.qrToken || `POS-${Math.random().toString(36).substring(2, 10).toUpperCase()}`,
-                            status: 'VALID' // status awal tiket setelah lunas adalah VALID
+                            status: 'VALID' 
                         }));
                     }
 
@@ -263,7 +263,6 @@
                             } else if (status === 'REJECTED' || status === 'CANCELLED' || status === 'EXPIRED') {
                                 targetOrder.tickets.forEach(t => {
                                     const idx = seats.findIndex(s => s.id === t.seat);
-                                    // PENTING: Hanya bebaskan kursi jika belum di-book secara lunas (SOLD) oleh orang lain.
                                     if(idx > -1 && seats[idx].status !== 'SOLD') { 
                                         seats[idx].status = 'AVAILABLE'; modified = true; 
                                     }
@@ -354,7 +353,7 @@
                 if (!foundTicket) return { success: false, msg: 'TIKET TIDAK DITEMUKAN / BELUM LUNAS' };
                 if (foundTicket.status === 'USED') return { success: false, msg: 'TIKET SUDAH DIGUNAKAN', data: foundTicket };
                 
-                foundTicket.status = 'USED'; // Status tiket berubah menjadi USED setelah check-in
+                foundTicket.status = 'USED';
                 foundTicket.usedAt = new Date().toISOString();
                 
                 await updateDoc(doc(db, "posera_orders", foundOrderDocId), { tickets: foundOrderData.tickets });
@@ -509,7 +508,6 @@
             const rightWingSeats = filteredSeats.slice(halfIdx);
 
             const toggleSeat = (seat) => {
-                // Notifikasi Peringatan jika diklik (Req 3)
                 if(seat.status === 'SOLD') return setToast('Maaf, kursi ini sudah Terjual dan Terbayar.', 'error');
                 if(seat.status === 'RESERVED') return setToast('Maaf, kursi ini sedang dipesan orang lain (Menunggu Verifikasi).', 'error');
                 
@@ -538,7 +536,6 @@
             const handleFileChange = (e) => {
                 const file = e.target.files[0];
                 if (file) {
-                    // Implementasi Client-side Image Compression (Req 4)
                     const reader = new FileReader();
                     reader.onload = (event) => {
                         const img = new Image();
@@ -566,7 +563,6 @@
                             const ctx = canvas.getContext('2d');
                             ctx.drawImage(img, 0, 0, width, height);
                             
-                            // Kompresi menjadi JPEG dengan kualitas 60%
                             const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.6);
                             setPaymentProof(compressedDataUrl);
                         };
@@ -841,7 +837,6 @@
                 }
             };
 
-            // Fungsi untuk mengunduh gambar tiket menggunakan HTML2Canvas
             const handleDownloadTicket = async (tokenId, seatInfo) => {
                 const element = document.getElementById(`ticket-${tokenId}`);
                 if (element && window.html2canvas) {
@@ -928,7 +923,6 @@
                                         
                                         return (
                                         <div key={idx} className="flex flex-col gap-3">
-                                            {/* Container TIKET yang akan diunduh */}
                                             <div id={`ticket-${t.qrToken}`} className="bg-black rounded-2xl border border-gray-800 overflow-hidden flex flex-col sm:flex-row relative shadow-lg">
                                                 <div className="sm:w-2/5 w-full bg-gray-900 border-b sm:border-b-0 sm:border-r border-gray-800 relative h-36 sm:h-auto flex flex-col justify-center items-center p-4">
                                                     <img src="WhatsApp Image 2026-08-18 at 09.03.04.jpeg" alt="Logo" className="absolute inset-0 w-full h-full object-cover opacity-30 blur-[2px]" onError={(e)=>{e.target.style.display='none';}} />
@@ -950,7 +944,6 @@
                                                 </div>
                                             </div>
                                             
-                                            {/* Tombol Download (Tidak ikut diunduh di dalam gambar) */}
                                             <button onClick={() => handleDownloadTicket(t.qrToken, t.seat)} className="w-full bg-posera-gold hover:bg-yellow-600 text-black font-bold py-2.5 rounded-xl text-sm transition shadow-lg flex items-center justify-center gap-2">
                                                 <i className="fas fa-download"></i> Simpan Gambar Tiket
                                             </button>
@@ -991,8 +984,6 @@
             const [previewImage, setPreviewImage] = useState(null);
             const [isSyncing, setIsSyncing] = useState(false);
             const isScanningRef = useRef(false);
-            
-            // Tambahan State untuk Filter Table (Req 6)
             const [filterStatus, setFilterStatus] = useState('ALL');
 
             useEffect(() => {
@@ -1022,11 +1013,9 @@
             };
 
             useEffect(() => {
-                // Fetch data di setiap view untuk update check-in realtime
                 fetchAdminData();
             }, [view]);
 
-            // Inisialisasi Scanner ketika menu Scan aktif
             useEffect(() => {
                 let scanner = null;
                 if (view === 'scan') {
@@ -1038,7 +1027,6 @@
                         );
                         scanner.render(
                             async (decodedText) => {
-                                // Mencegah scan berulang beruntun
                                 if (isScanningRef.current) return;
                                 isScanningRef.current = true;
                                 
@@ -1046,7 +1034,6 @@
                                     const res = await DB.checkIn(decodedText);
                                     if (res.success) {
                                         setToast(`✅ ${res.msg} - Kursi ${res.data.seat} (${res.data.orderName})`, 'success');
-                                        // Refresh data tabel recent check-in secara realtime
                                         await fetchAdminData(); 
                                     } else {
                                         setToast(`❌ ${res.msg}`, 'error');
@@ -1054,11 +1041,9 @@
                                 } catch (error) {
                                     setToast('Sistem error saat memproses tiket', 'error');
                                 }
-                                
-                                // Jeda 3 detik sebelum bisa scan tiket selanjutnya
                                 setTimeout(() => { isScanningRef.current = false; }, 3000);
                             },
-                            (err) => { /* Abaikan pesan error berkelanjutan dari background scanning */ }
+                            (err) => { }
                         );
                     }, 200);
                 }
@@ -1071,42 +1056,30 @@
             }, [view]);
 
             const handleSyncSeats = async () => {
-                if(!confirm("Yakin ingin mensinkronkan ulang (Kunci) kursi dengan data pesanan? Fitur ini akan mendeteksi tiket yang sudah PAID dan langsung menguncinya menjadi SOLD, mencegah pemesanan ganda secara permanen.")) return;
+                if(!confirm("Yakin ingin mensinkronkan ulang (Kunci) kursi dengan data pesanan?")) return;
                 
                 setIsSyncing(true);
                 try {
                     const { db, doc, getDoc, setDoc } = window.FB;
                     const seatDocRef = doc(db, "posera_config", "seats");
                     const snap = await getDoc(seatDocRef);
-                    
                     if(!snap.exists()) throw new Error("Gagal mengambil konfigurasi kursi");
-                    
                     let seatsList = snap.data().list;
                     
-                    // Reset semua jadi available
                     seatsList.forEach(s => s.status = 'AVAILABLE');
-                    
-                    // Algoritma Prioritas Absolut (Req 1 & 2): 
-                    // 1. Terapkan RESERVED (Waiting Verification)
                     orders.forEach(o => {
                         if(o.status === 'WAITING_VERIFICATION') {
                             o.tickets?.forEach(t => {
                                 const idx = seatsList.findIndex(s => s.id === t.seat);
-                                if(idx > -1) {
-                                    seatsList[idx].status = 'RESERVED';
-                                }
+                                if(idx > -1) { seatsList[idx].status = 'RESERVED'; }
                             });
                         }
                     });
-
-                    // 2. Terapkan SOLD (Paid/Lunas) menimpa apapun status sebelumnya
                     orders.forEach(o => {
                         if(o.status === 'PAID') {
                             o.tickets?.forEach(t => {
                                 const idx = seatsList.findIndex(s => s.id === t.seat);
-                                if(idx > -1) {
-                                    seatsList[idx].status = 'SOLD';
-                                }
+                                if(idx > -1) { seatsList[idx].status = 'SOLD'; }
                             });
                         }
                     });
@@ -1164,7 +1137,6 @@
                 }
             };
 
-            // Menambahkan Fitur Export Data Spesifik Check-in ke Excel
             const handleExportCheckIn = () => {
                 const checkInData = [];
                 orders.forEach(o => {
@@ -1254,7 +1226,38 @@
                 }
             };
             
-            // Logika Filter (Req 6)
+            // FUNGSI HELPER UNTUK WHATSAPP TEMPLATE
+            const formatWA = (phone) => {
+                if (!phone) return '';
+                let formatted = phone.replace(/\D/g, ''); // Hapus semua karakter non-angka
+                if (formatted.startsWith('0')) {
+                    formatted = '62' + formatted.substring(1); // Ubah 0 jadi 62
+                }
+                return formatted;
+            };
+
+            const sendWA = (order, type) => {
+                const phone = formatWA(order.wa);
+                if (!phone || phone.length < 9) {
+                    setToast("Nomor WhatsApp tidak valid!", 'error');
+                    return;
+                }
+                
+                const seatsList = order.tickets ? order.tickets.map(t => t.seat).join(', ') : '';
+                let text = '';
+                
+                if (type === 'success') {
+                    text = `Halo ${order.name},\n\nTerima kasih sudah memesan tiket POSERA dengan judul naskah "SANGKALA".\n\nDetail Pesanan Anda:\n• Order ID: *${order.orderId}*\n• Nomor Tiket/Kursi: *${seatsList}*\n\nTerima kasih! 🙏`;
+                } else if (type === 'double') {
+                    text = `Mohon maaf Bapak/Ibu ${order.name},\n\nKarena adanya masalah pada sistem kami, nomor tiket yang Anda pesan (*${seatsList}*) tertimpa dengan data pemesan lainnya.\n\nMohon konfirmasinya apakah berkenan untuk diganti dengan nomor kursi yang masih tersedia, atau ingin melakukan proses pembatalan/refund? Sekali lagi kami mohon maaf atas ketidaknyamanan ini. 🙏`;
+                } else {
+                    text = `Halo ${order.name}, `; // Chat kosong / manual
+                }
+                
+                // Buka tab baru ke WhatsApp web/app
+                window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank');
+            };
+
             const filteredOrders = orders.filter(o => filterStatus === 'ALL' || o.status === filterStatus);
 
             return (
@@ -1286,7 +1289,6 @@
                                     </h1>
                                     
                                     <div className="flex flex-wrap gap-3 items-center w-full lg:w-auto">
-                                        {/* Dropdown Filter Req 6 */}
                                         <div className="flex items-center gap-2 bg-gray-900 border border-gray-700 rounded-lg p-1">
                                             <span className="text-xs text-gray-400 pl-2">Filter:</span>
                                             <select 
@@ -1323,7 +1325,7 @@
                                                     <input type="checkbox" onChange={handleSelectAll} checked={filteredOrders.length > 0 && selectedOrderIds.length === filteredOrders.length} className="cursor-pointer accent-posera-red w-4 h-4" />
                                                 </th>
                                                 <th className="p-3 md:p-4">ID Transaksi</th>
-                                                <th className="p-3 md:p-4">Nama / Detail Nomor Kursi</th>
+                                                <th className="p-3 md:p-4 min-w-[200px]">Nama / Detail Nomor Kursi</th>
                                                 <th className="p-3 md:p-4">Metode & Bukti</th>
                                                 <th className="p-3 md:p-4">Status</th>
                                                 <th className="p-3 md:p-4 text-center">Aksi</th>
@@ -1338,7 +1340,21 @@
                                                     <td className="p-3 md:p-4 font-mono text-posera-gold font-bold">{o.orderId}</td>
                                                     <td className="p-3 md:p-4">
                                                         <div className="font-bold text-white text-sm">{o.name}</div>
-                                                        <div className="text-[11px] text-gray-400 mb-1.5">{o.wa}</div>
+                                                        <div className="text-[11px] text-gray-400 mb-1">{o.wa}</div>
+                                                        
+                                                        {/* TOMBOL KONTAK WHATSAPP (Req 1,2,3,4) */}
+                                                        <div className="flex flex-wrap gap-1 mb-2">
+                                                            <button onClick={() => sendWA(o, 'success')} className="bg-green-600/80 hover:bg-green-500 text-white text-[10px] px-2 py-1 rounded flex items-center gap-1 transition" title="Kirim WA Konfirmasi">
+                                                                <i className="fab fa-whatsapp"></i> Konfirmasi
+                                                            </button>
+                                                            <button onClick={() => sendWA(o, 'double')} className="bg-orange-600/80 hover:bg-orange-500 text-white text-[10px] px-2 py-1 rounded flex items-center gap-1 transition" title="Kirim WA Masalah Double">
+                                                                <i className="fab fa-whatsapp"></i> Info Double
+                                                            </button>
+                                                            <button onClick={() => sendWA(o, 'chat')} className="bg-gray-700 hover:bg-gray-600 text-white text-[10px] px-2 py-1 rounded flex items-center gap-1 transition" title="Mulai Chat Biasa">
+                                                                <i className="fab fa-whatsapp"></i> Chat
+                                                            </button>
+                                                        </div>
+
                                                         <div className="flex flex-wrap gap-1 max-w-[200px]">
                                                             {o.tickets && o.tickets.map((t, idx) => (
                                                                 <span key={idx} title={t.status === 'USED' ? `Check-in: ${new Date(t.usedAt).toLocaleString('id-ID')}` : 'Belum Check-in'} className={`px-1.5 py-0.5 rounded text-[10px] font-mono border font-bold ${t.cat === 'VIP' ? 'bg-green-900/30 text-green-400 border-green-800' : t.cat === 'REGULER' ? 'bg-red-900/30 text-red-400 border-red-800' : 'bg-yellow-900/30 text-yellow-400 border-yellow-800'} ${t.status === 'USED' ? 'opacity-50' : ''}`}>
@@ -1365,7 +1381,6 @@
                                                             {o.status === 'WAITING_VERIFICATION' && (
                                                                 <button onClick={() => handleStatusChange(o.orderId, 'PAID')} className="bg-green-600 hover:bg-green-700 text-white px-2 py-1.5 rounded text-xs font-bold shadow transition w-full">Verifikasi</button>
                                                             )}
-                                                            {/* Admin kini bisa membatalkan kapanpun (Req 5) meskipun sudah dibayar */}
                                                             {(o.status === 'WAITING_VERIFICATION' || o.status === 'PAID') && (
                                                                 <button onClick={() => handleStatusChange(o.orderId, 'CANCELLED')} className="bg-red-800 hover:bg-red-700 border border-red-600 text-white px-2 py-1.5 rounded text-xs font-bold shadow transition w-full">Batalkan</button>
                                                             )}
@@ -1415,14 +1430,12 @@
                         {view === 'scan' && (
                             <div className="max-w-4xl mx-auto fade-in">
                                 <div className="flex flex-col lg:flex-row gap-6">
-                                    {/* Bagian Scanner */}
                                     <div className="w-full lg:w-1/2">
                                         <h1 className="text-xl md:text-2xl font-bold mb-4">Scanner QR/Barcode</h1>
                                         <p className="text-sm text-gray-400 mb-4">Silakan izinkan akses kamera jika browser memintanya. Pilih kamera yang sesuai dari menu dropdown di bawah (Mendukung Kamera Internal/Eksternal/Webcam).</p>
                                         <div id="qr-reader-admin" className="w-full min-h-[300px] border border-gray-700 rounded-xl overflow-hidden shadow-2xl"></div>
                                     </div>
                                     
-                                    {/* Bagian Daftar Kehadiran / Log Checkin */}
                                     <div className="w-full lg:w-1/2 bg-posera-gray p-4 rounded-xl border border-gray-800">
                                         <div className="flex justify-between items-center mb-4 border-b border-gray-800 pb-2">
                                             <h2 className="text-lg font-bold text-posera-gold">Log Hadir Terkini</h2>
@@ -1432,7 +1445,7 @@
                                         </div>
                                         <div className="max-h-[400px] overflow-y-auto pr-2 hide-scrollbar">
                                             {orders.flatMap(o => (o.tickets || []).filter(t => t.status === 'USED').map(t => ({...t, name: o.name, orderId: o.orderId})))
-                                                .sort((a, b) => new Date(b.usedAt) - new Date(a.usedAt)) // Urut dari yang terbaru
+                                                .sort((a, b) => new Date(b.usedAt) - new Date(a.usedAt)) 
                                                 .map((t, idx) => (
                                                 <div key={idx} className="bg-black p-3 rounded-lg mb-2 border border-gray-800 text-sm flex justify-between items-center fade-in">
                                                     <div>
