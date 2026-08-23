@@ -1506,17 +1506,29 @@
                 localStorage.setItem('posera_app_route', JSON.stringify(route));
             }, [route]);
 
+            // LOGIKA AUDIO DENGAN BATAS WAKTU (1:46 - 2:15)
             useEffect(() => { 
                 DB.init(); 
                 if(localStorage.getItem('adminAuth') === 'true') setIsAdminAuth(true);
 
                 const audio = new Audio('Beneath_the_Burning_Roof.mp3');
-                audio.loop = true;
+                const reffStart = 106; // 1 menit 46 detik
+                const reffEnd = 135;   // 2 menit 15 detik
+
                 audio.volume = 0.4;
                 audioRef.current = audio;
 
+                // Event listener agar audio kembali ke awal reff jika sudah mencapai batas akhir
+                audio.addEventListener('timeupdate', () => {
+                    if (audio.currentTime >= reffEnd) {
+                        audio.currentTime = reffStart; 
+                    }
+                });
+
                 const startAudio = () => {
                     if (audio.paused) {
+                        // Mulai dari detik 106
+                        audio.currentTime = reffStart;
                         audio.play().then(() => {
                             setIsPlayingAudio(true);
                         }).catch((err) => {
@@ -1540,11 +1552,17 @@
             }, []);
 
             const toggleAudio = () => {
+                const reffStart = 106;
+                const reffEnd = 135;
                 if (audioRef.current) {
                     if (isPlayingAudio) {
                         audioRef.current.pause();
                         setIsPlayingAudio(false);
                     } else {
+                        // Pastikan jika diputar ulang (play), waktunya berada di dalam rentang yang diizinkan
+                        if (audioRef.current.currentTime < reffStart || audioRef.current.currentTime > reffEnd) {
+                            audioRef.current.currentTime = reffStart;
+                        }
                         audioRef.current.play();
                         setIsPlayingAudio(true);
                     }
