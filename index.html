@@ -1506,12 +1506,12 @@
                 localStorage.setItem('posera_app_route', JSON.stringify(route));
             }, [route]);
 
-            // LOGIKA AUDIO DENGAN BATAS WAKTU (1:46 - 2:15)
+            // LOGIKA AUDIO DENGAN OST-Sangkala.mp3 (1:46 - 2:15)
             useEffect(() => { 
                 DB.init(); 
                 if(localStorage.getItem('adminAuth') === 'true') setIsAdminAuth(true);
 
-                const audio = new Audio('Beneath_the_Burning_Roof.mp3');
+                const audio = new Audio('OST-Sangkala.mp3');
                 const reffStart = 106; // 1 menit 46 detik
                 const reffEnd = 135;   // 2 menit 15 detik
 
@@ -1559,7 +1559,7 @@
                         audioRef.current.pause();
                         setIsPlayingAudio(false);
                     } else {
-                        // Pastikan jika diputar ulang (play), waktunya berada di dalam rentang yang diizinkan
+                        // Pastikan jika diputar ulang, waktunya berada di dalam rentang 1:46 - 2:15
                         if (audioRef.current.currentTime < reffStart || audioRef.current.currentTime > reffEnd) {
                             audioRef.current.currentTime = reffStart;
                         }
